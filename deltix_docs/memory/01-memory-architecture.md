@@ -1,4 +1,4 @@
-# Memory Layer: Architecture & Design
+﻿# Memory Layer: Architecture & Design
 
 ## 1. Overview & Purpose
 
@@ -9,7 +9,7 @@ The DELTIX Memory Layer is a **hybrid dual-tier memory system**:
 2. **Tier 2: Episodic / Historical Memory (Long-Term)** — Vectorized representations of historically resolved incidents, remediations, and verified postconditions powered by PostgreSQL's `pgvector` extension and Redis caching.
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph INGEST["Incident & Evidence Ingestion"]
       INC["Active Incident"]
       EVID["Authoritative Evidence Items\n(PayPal API & Merchant DB)"]

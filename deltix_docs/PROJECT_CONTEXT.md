@@ -1,4 +1,4 @@
-# DELTIX — Project Context
+﻿# DELTIX — Project Context
 
 ## 1. Product Overview
 
@@ -30,7 +30,7 @@ DELTIX is an intelligent incident investigation and policy-controlled recovery s
 ## 3. Microservices Architecture & Swarm Topology
 
 ```mermaid
-flowchart TB
+flowchart LR
     INTERNET["Public Internet / PayPal Webhooks / Clients"] --> INGRESS["Ingress / Reverse Proxy (Traefik / Nginx)\nPorts 80 / 443"]
 
     subgraph SWARM["Docker Swarm Cluster (Overlay Network: deltix-net)"]
@@ -172,6 +172,7 @@ flowchart LR
 
 ```mermaid
 stateDiagram-v2
+  direction LR
   [*] --> Proposed
   Proposed --> PolicyEvaluated
   PolicyEvaluated --> Denied : Unregistered or Preconditions Failed

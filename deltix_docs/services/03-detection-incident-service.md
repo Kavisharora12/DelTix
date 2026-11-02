@@ -1,11 +1,11 @@
-# Service: Detection and Incident Management
+﻿# Service: Detection and Incident Management
 
 ## Responsibility
 
 Evaluate deterministic rules against normalized event streams and authoritative state. Create, deduplicate, and transition incidents across their lifecycle.
 
 ```mermaid
-flowchart TD
+flowchart LR
     EVT["Normalized Event"] --> EVAL["Deterministic Rule Evaluator"]
     EVAL --> RULE1{"Operational Rule:\nPayment Captured &\nOrder Pending > Grace Period?"}
     EVAL --> RULE2{"Security Rule:\nPayout Requested &\nMissing Business Auth?"}

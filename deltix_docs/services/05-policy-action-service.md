@@ -1,11 +1,11 @@
-# Service: Policy and Action Execution
+﻿# Service: Policy and Action Execution
 
 ## Responsibility
 
 Deterministically evaluate proposed actions in Go, enforce risk tiers, manage approval flows, and execute typed allowlisted recovery actions with distributed locking in Redis.
 
 ```mermaid
-flowchart TD
+flowchart LR
     PROP["AI Proposed Action"] --> POL["Go Policy Engine"]
     POL --> CHECK1{"Is Action in Allowlist?"}
     CHECK1 -->|No| DENY["DENY Action & Log Audit"]

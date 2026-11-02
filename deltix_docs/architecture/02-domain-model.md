@@ -1,4 +1,4 @@
-# Domain Model and State Machines
+﻿# Domain Model and State Machines
 
 ## 1. Core Entities
 
@@ -48,6 +48,7 @@
 
 ```mermaid
 stateDiagram-v2
+  direction LR
   [*] --> Detected
   Detected --> Investigating
   Investigating --> AwaitingApproval : Action Requires Human Signoff
@@ -72,6 +73,7 @@ stateDiagram-v2
 
 ```mermaid
 stateDiagram-v2
+  direction LR
   [*] --> Proposed
   Proposed --> PolicyChecked
   PolicyChecked --> Denied : Disallowed by Policy

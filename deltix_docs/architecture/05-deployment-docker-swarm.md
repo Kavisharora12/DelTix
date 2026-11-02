@@ -1,4 +1,4 @@
-# Deployment Architecture: Docker Swarm
+﻿# Deployment Architecture: Docker Swarm
 
 ## 1. Overview & Swarm Topology
 
@@ -7,7 +7,7 @@ DELTIX is deployed as a **streamlined microservices stack** orchestrated with **
 Live external PayPal Sandbox queries are handled natively by the Python AI agent using the official `paypal-agent-toolkit`.
 
 ```mermaid
-flowchart TB
+flowchart LR
     INTERNET["Public Internet / PayPal Webhooks / Clients"] --> INGRESS["Ingress / Reverse Proxy (Traefik / Nginx)\nPorts 80 / 443"]
 
     subgraph SWARM["Docker Swarm Cluster (Overlay Network: deltix-net)"]

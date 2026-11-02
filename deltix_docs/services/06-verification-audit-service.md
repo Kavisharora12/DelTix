@@ -1,11 +1,11 @@
-# Service: Verification and Audit
+﻿# Service: Verification and Audit
 
 ## Responsibility
 
 Independently verify post-action state against authoritative sources and maintain an immutable append-only audit trail of all ingestion events, detections, investigations, policy decisions, approvals, and executions.
 
 ```mermaid
-flowchart TD
+flowchart LR
     EXEC["Action Execution Finished"] --> VER["Independent Verifier"]
     VER --> QUERY["Re-query Authoritative Source\n(PayPal Sandbox API / Merchant DB)"]
     QUERY --> CHECK{"Declared Postconditions Met?"}

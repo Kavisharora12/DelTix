@@ -1,11 +1,11 @@
-# System Overview
+﻿# System Overview
 
 ## 1. High-Level Architecture (Microservices in Docker Swarm with PayPal Agent Toolkit)
 
 DELTIX is organized as a streamlined microservices system orchestrated via **Docker Swarm**, integrating directly with live PayPal Sandbox APIs using the official **PayPal Agent Toolkit**.
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph SOURCES["Event Sources"]
       PP_HOOK["PayPal Sandbox Webhooks"]
       APP["Internal Merchant Order Events"]

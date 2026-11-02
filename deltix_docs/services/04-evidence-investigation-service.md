@@ -1,11 +1,11 @@
-# Service: Evidence and AI Investigation (with PayPal Agent Toolkit & Memory)
+﻿# Service: Evidence and AI Investigation (with PayPal Agent Toolkit & Memory)
 
 ## Responsibility
 
 Collect authoritative evidence directly from live PayPal Sandbox APIs using the official **`paypal-agent-toolkit`**, retrieve similar historical incidents via a vector memory layer (`pgvector`), and generate structured, evidence-grounded incident investigations using an AI agent.
 
 ```mermaid
-flowchart TB
+flowchart LR
     subgraph GO["Go Core Backend"]
       INC["Active Incident\n(e.g., PAYMENT_CAPTURED_ORDER_PENDING)"] --> DISPATCH["Dispatch Investigation Request\n(POST /ai/investigate)"]
     end
