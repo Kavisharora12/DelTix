@@ -22,6 +22,7 @@ flowchart LR
     VERIF -->|Postconditions Failed| REOPEN["Mark Verification FAILED\n& Reopen Incident"]
 
     RESOLVE --> AUDIT["Append Immutable Audit Entry"]
+    RESOLVE --> MEM0["Save Precedent to Mem0\n(incident_memories)"]
     REOPEN --> AUDIT
     REJ --> AUDIT
 ```
@@ -53,7 +54,7 @@ The Go policy engine is the **sole authority** that grants execution rights. The
 
 ---
 
-## 3. Independent Postcondition Verification
+## 3. Independent Postcondition Verification & Mem0 Learning
 
 A successful executor response is necessary, but **not sufficient**, to resolve an incident.
 
@@ -61,7 +62,11 @@ The Verifier performs an out-of-band query against the authoritative source:
 1. **Order Recovery:** Verifies that internal order status is `PAID` AND re-verifies that PayPal capture status remains `COMPLETED`.
 2. **Containment:** Verifies that the route/credential is disabled and subsequent test transactions are rejected.
 
-If the postcondition is not confirmed, the incident is **never** resolved.
+### Feedback Loop to Mem0
+When verification confirms success:
+- DELTIX publishes an `INCIDENT_VERIFIED` event.
+- The Python AI agent records the verified resolution into **Mem0** (`memory.add()`) with metadata (`incident_type`, `action_type`, `verified=True`), ensuring future incidents of this type retrieve this successful playbook.
+- If postconditions fail, the incident is **never** resolved, no precedent is saved, and human review is escalated.
 
 ---
 

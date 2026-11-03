@@ -1,4 +1,4 @@
-# Service 3: AI Investigation & Dual-Tier Memory
+# Service 3: AI Investigation & Dual-Tier Memory (Mem0 & PayPal Agent Toolkit)
 
 ## 1. Responsibility
 
@@ -71,9 +71,33 @@ toolkit = PayPalAgentToolkit(
    - Enforces the **Evidence Citation Rule**: The AI is strictly prohibited from claiming a fact without citing an `evidence_id`.
 
 2. **Tier 2: Episodic Memory (Mem0 + pgvector)**
-   - Open-source `mem0ai` running self-hosted, pointed to PostgreSQL (`pgvector`) and Redis.
+   - Open-source **Mem0** (`mem0ai`) running self-hosted, pointed to PostgreSQL (`pgvector`) and Redis.
    - When an incident is analyzed, `memory.search()` retrieves the top-3 historically verified resolution playbooks for that incident type.
    - The precedents are injected as few-shot context into the system prompt.
+
+```python
+from mem0 import Memory
+
+# Self-hosted Mem0 connected to PostgreSQL (pgvector)
+memory = Memory.from_config({
+    "vector_store": {
+        "provider": "pgvector",
+        "config": {
+            "connection_string": os.environ["DATABASE_URL"],
+            "table_name": "incident_memories",
+            "distance_strategy": "cosine"
+        }
+    }
+})
+
+# Retrieve top-3 verified historical resolution precedents
+precedents = memory.search(
+    query="PayPal payment captured but merchant order is still pending",
+    user_id="deltix_system",
+    limit=3,
+    filters={"incident_type": "PAYMENT_CAPTURED_ORDER_PENDING", "verified": True}
+)
+```
 
 ---
 
