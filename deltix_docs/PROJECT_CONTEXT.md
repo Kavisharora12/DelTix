@@ -139,23 +139,23 @@ flowchart LR
       INC["Active Incident & Evidence"]
     end
 
-    subgraph PYTHON_SVC["Python AI Service (paypal-agent-toolkit)"]
+    subgraph PYTHON_SVC["Python AI Service"]
       TOOLKIT["PayPal Agent Toolkit\n(Live Sandbox Inspection)"]
-      EMB["Embedder Model"]
-      SIM_QUERY["Top-K Cosine Similarity"]
+      MEM0["Mem0 Memory Engine\n(Open-Source mem0ai)"]
       PROMPT["Prompt Context Assembler"]
       LLM["LLM (Instructor / Pydantic)"]
     end
 
-    subgraph DB["PostgreSQL"]
-      PGV[("incident_embeddings (pgvector)")]
+    subgraph DB["PostgreSQL + pgvector & Redis"]
+      PGV[("incident_memories (pgvector)")]
+      CACHE[("Redis Query Cache")]
     end
 
     INC --> TOOLKIT
-    INC --> EMB
-    EMB --> SIM_QUERY
-    SIM_QUERY <-->|Vector Search| PGV
-    SIM_QUERY -->|Past Resolved Incidents| PROMPT
+    INC --> MEM0
+    MEM0 <-->|Similarity Search| PGV
+    MEM0 <-->|Query Cache| CACHE
+    MEM0 -->|Past Resolved Precedents| PROMPT
     TOOLKIT -->|Authoritative Sandbox State| PROMPT
     INC -->|Current Facts & Timeline| PROMPT
     PROMPT --> LLM
@@ -163,7 +163,7 @@ flowchart LR
 ```
 
 1. **Working Memory (Active Incident):** Bounded chronological timeline, authoritative evidence items from the PayPal Agent Toolkit, and citation enforcement.
-2. **Episodic Memory (Historical Resolutions):** Stored in `incident_embeddings` via `pgvector` with HNSW cosine distance indexing and Redis top-k caching.
+2. **Episodic Memory (Historical Resolutions via Mem0):** Powered by the open-source `mem0ai` engine, storing incident precedents in `incident_memories` via `pgvector` with HNSW cosine distance indexing and Redis caching.
 3. **Deterministic Policy Boundary:** The memory layer and AI agent only propose actions. The Go policy engine deterministically authorizes or denies.
 
 ---

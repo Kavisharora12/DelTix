@@ -1,80 +1,143 @@
-# Memory Layer: Vector Schema & Retrieval
+# Memory Layer: Mem0 Integration & Retrieval
 
-## 1. Vector Database Schema (PostgreSQL + pgvector)
+## 1. Mem0 Configuration (Self-Hosted in Python Service)
+
+The Python service (`deltix-ai-agent`) initializes the open-source `mem0ai` library using our existing PostgreSQL (`pgvector`) and Redis containers:
+
+```bash
+pip install mem0ai psycopg2-binary
+```
+
+```python
+import os
+from mem0 import Memory
+
+# Configure Mem0 with self-hosted pgvector backend
+mem0_config = {
+    "vector_store": {
+        "provider": "pgvector",
+        "config": {
+            "connection_string": os.environ["DATABASE_URL"],
+            "table_name": "incident_memories",
+            "distance_strategy": "cosine"
+        }
+    },
+    "llm": {
+        "provider": "gemini",
+        "config": {
+            "model": "gemini-1.5-flash",
+            "api_key": os.environ["GEMINI_API_KEY"]
+        }
+    },
+    "embedder": {
+        "provider": "gemini",
+        "config": {
+            "model": "models/text-embedding-004",
+            "api_key": os.environ["GEMINI_API_KEY"]
+        }
+    }
+}
+
+memory = Memory.from_config(mem0_config)
+```
+
+---
+
+## 2. Storing Verified Incident Resolutions
+
+When the Go **Verifier** confirms an incident's postconditions (`status = 'VERIFIED'`), `deltix-ai-agent` writes the precedent into Mem0 with structured metadata:
+
+```python
+def save_verified_precedent(
+    incident_type: str,
+    root_cause: str,
+    action_type: str,
+    rationale: str,
+    verification_proof: str
+):
+    text_content = (
+        f"Incident: {incident_type}. "
+        f"Root cause: {root_cause}. "
+        f"Remediated by: {action_type}. "
+        f"Rationale: {rationale}. "
+        f"Postcondition Verification: {verification_proof}"
+    )
+    
+    memory.add(
+        messages=text_content,
+        user_id="deltix_system",
+        metadata={
+            "incident_type": incident_type,
+            "action_type": action_type,
+            "verified": True
+        }
+    )
+```
+
+---
+
+## 3. Precedent Retrieval Query
+
+When a new incident begins investigation, Mem0 retrieves the most relevant past precedents:
+
+```python
+def retrieve_precedents(incident_type: str, failure_description: str) -> list[dict]:
+    # Query Mem0 filtered by incident type and verification status
+    results = memory.search(
+        query=failure_description,
+        user_id="deltix_system",
+        limit=3,
+        filters={
+            "incident_type": incident_type,
+            "verified": True
+        }
+    )
+    return results["results"]
+```
+
+---
+
+## 4. Few-Shot Memory Context Assembly
+
+Mem0 search results are injected directly into the LLM system prompt as verified precedents:
+
+```text
+HISTORICAL VERIFIED INCIDENT PRECEDENTS (VIA MEM0):
+
+Precedent 1 (Relevance: 0.94):
+- Incident Type: PAYMENT_CAPTURED_ORDER_PENDING
+- Root Cause: Webhook delivery succeeded at PayPal but merchant order consumer dropped event.
+- Remediated by: REPROCESS_INTERNAL_ORDER_EVENT
+- Rationale: Authoritative PayPal capture was COMPLETED. Replaying the event updated order to PAID without moving money twice.
+- Verification: Order status confirmed PAID and capture remained COMPLETED.
+
+Use these precedents to evaluate whether the current incident follows an identical failure pattern.
+```
+
+---
+
+## 5. Underlying Database Schema (Managed by Mem0 on pgvector)
+
+Mem0 automatically maintains the `incident_memories` table in PostgreSQL with an HNSW cosine index:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
 
-CREATE TABLE incident_embeddings (
+-- Table created and managed by Mem0
+CREATE TABLE IF NOT EXISTS incident_memories (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    incident_id UUID NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-    incident_type TEXT NOT NULL,
-    error_signature TEXT,
-    embedding vector(1536) NOT NULL,
+    user_id TEXT,
+    memory TEXT NOT NULL,
+    hash TEXT,
     metadata JSONB NOT NULL DEFAULT '{}',
-    resolved_action_type TEXT,
-    was_verified BOOLEAN NOT NULL DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    UNIQUE (incident_id)
+    embedding vector(768),
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Fast Approximate Nearest Neighbor Index (HNSW with Cosine Distance)
-CREATE INDEX idx_incident_embeddings_hnsw 
-ON incident_embeddings 
+-- Fast HNSW Cosine Distance Index
+CREATE INDEX IF NOT EXISTS idx_incident_memories_hnsw 
+ON incident_memories 
 USING hnsw (embedding vector_cosine_ops)
 WITH (m = 16, ef_construction = 64);
-
--- Indexed Offset & Filtering Composite Index
-CREATE INDEX idx_incident_embeddings_filter 
-ON incident_embeddings (incident_type, was_verified, created_at DESC, id);
 ```
-
----
-
-## 2. Similarity Retrieval Query
-
-When an incident requires investigation, the Python AI service executes a filtered vector search to retrieve only **verified resolutions**:
-
-```sql
-SELECT 
-    incident_id,
-    incident_type,
-    resolved_action_type,
-    metadata->>'summary' AS past_summary,
-    metadata->>'resolution_rationale' AS past_rationale,
-    1 - (embedding <=> $1) AS similarity_score
-FROM incident_embeddings
-WHERE was_verified = true
-  AND incident_type = $2
-ORDER BY embedding <=> $1
-LIMIT 3;
-```
-
----
-
-## 3. Few-Shot Memory Context Assembly
-
-The retrieved historical incidents are formatted into the LLM system prompt as verified precedents:
-
-```text
-HISTORICAL SIMILAR INCIDENT RESOLUTIONS (FEW-SHOT PRECEDENTS):
-
-1. Past Incident ID: inc-091a (Similarity: 0.94)
-   - Type: PAYMENT_CAPTURED_ORDER_PENDING
-   - Authoritative State: PayPal capture status was COMPLETED, order was PENDING.
-   - Successful Action: REPROCESS_INTERNAL_ORDER_EVENT
-   - Rationale: Authoritative provider confirmed capture. Reprocessing internal event safely updated order state to PAID without duplicating payment.
-   - Verification: Confirmed order status became PAID and capture remained COMPLETED.
-
-Use these precedents to evaluate if the current incident follows an identical failure pattern.
-```
-
----
-
-## 4. Write-Back Pipeline
-
-When an incident's postconditions are confirmed by the Go **Verifier**:
-1. Go publishes an `INCIDENT_VERIFIED` event or updates `verifications`.
-2. Python AI service embeds the incident summary, root cause, and verified action.
-3. Inserts or updates the row in `incident_embeddings` with `was_verified = true`.
-4. Invalidates the Redis memory cache for that incident signature.
