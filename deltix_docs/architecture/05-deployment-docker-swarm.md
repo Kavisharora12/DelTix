@@ -1,4 +1,4 @@
-﻿# Deployment Architecture: Docker Swarm
+# Deployment Architecture: Docker Swarm
 
 ## 1. Overview & Swarm Topology
 
@@ -19,10 +19,10 @@ flowchart LR
 
       SVC_CORE --> PG
       SVC_CORE --> REDIS
-      SVC_CORE <-->|HTTP /ai/investigate| SVC_AI["deltix-ai-agent (Python / FastAPI)\nReplicas: 1+\nPort: 8000\n[Official paypal-agent-toolkit]"]
+      SVC_CORE <-->|HTTP /ai/investigate| SVC_AI["deltix-ai-agent (Python / FastAPI)\nReplicas: 1+\nPort: 8000\n[paypal-agent-toolkit & Mem0]"]
       
-      SVC_AI <-->|Vector Cosine Search| PG
-      SVC_AI <-->|Top-k Cache| REDIS
+      SVC_AI <-->|Mem0 pgvector Search| PG
+      SVC_AI <-->|Mem0 Query Cache| REDIS
     end
 
     subgraph PAYPAL["PayPal Sandbox (Live External APIs)"]

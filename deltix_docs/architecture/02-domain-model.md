@@ -1,4 +1,4 @@
-﻿# Domain Model and State Machines
+# Domain Model and State Machines
 
 ## 1. Core Entities
 
@@ -6,7 +6,7 @@
 - **NormalizedEvent:** Canonical representation with indexed correlation identifiers.
 - **Incident:** A grouped operational or security problem requiring investigation.
 - **EvidenceItem:** A source-backed fact, observation, or authoritative check.
-- **IncidentEmbedding:** Vector representation of incident characteristics for similarity search in the memory layer.
+- **IncidentMemory (Mem0):** Episodic memory entry managed by Mem0 in `incident_memories` capturing past verified incident root causes, actions, and rationales.
 - **Investigation:** Structured analysis produced by the AI service citing specific evidence IDs.
 - **ActionProposal:** Typed remediation proposal with explicit preconditions and postconditions.
 - **Approval:** Human decision record for an action requiring approval.
@@ -98,7 +98,7 @@ stateDiagram-v2
 
 ---
 
-## 5. Evidence Semantics & Memory Layer
+## 5. Evidence Semantics & Memory Layer (Mem0)
 
 Every evidence item must record:
 - `kind`: `OBSERVED`, `AUTHORITATIVE_QUERY`, `DERIVED`, `MISSING`, or `CONTRADICTORY`.
@@ -107,8 +107,6 @@ Every evidence item must record:
 - `claim`: Concise factual statement.
 - `details`: Structured JSON attributes.
 
-### Fact Classification Rules for AI:
-- **Verified Fact:** Directly supported by an authoritative record; must cite `evidence_ids`.
-- **Hypothesis:** Plausible interpretation of multiple facts with noted limitations.
-- **Unknown:** Crucial data that is unavailable or could not be queried.
-- **Contradiction:** Disagreement between authoritative sources requiring reconciliation.
+### Dual-Tier Memory Semantics:
+1. **Tier 1 (Working Memory):** Immediate factual claims grounded in live evidence items collected via `paypal-agent-toolkit`. All factual assertions by the AI must cite `evidence_ids`.
+2. **Tier 2 (Episodic Memory via Mem0):** Precedents stored in `incident_memories` via `mem0ai`. Upon postcondition verification, verified resolutions are indexed so future investigations of similar incidents can retrieve the successful playbook as few-shot context.
