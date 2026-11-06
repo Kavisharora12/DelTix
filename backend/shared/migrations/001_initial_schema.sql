@@ -1,0 +1,2 @@
+-- Initial SQL Schema for DelTix
+-- Tables: agent_specs, agent_runs, agent_run_checkpoints, approval_requests, audit_events, mem0_memories
