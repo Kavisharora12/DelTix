@@ -3,56 +3,53 @@
 This diagram illustrates the container architecture of **DelTix**, detailing the Go control plane, Python execution plane, Redis caching/locking, Supabase database, and external providers.
 
 ```mermaid
-flowchart TB
-    Client["Client Browser / Developer Dashboard"]
+flowchart LR
+    Client["Client Browser / Dashboard"]
 
-    subgraph Edge["Edge / Ingress Tier"]
-        APIGateway["Service 1: API Gateway (Go)\n- Port 8080\n- JWT Auth & Tenant Context\n- Redis-backed Token Bucket Rate Limiting\n- SSE Stream Proxy"]
+    subgraph Edge["Edge Ingress"]
+        APIGateway["Service 1: API Gateway (Go)\n- Port 8080\n- JWT Auth\n- Redis Rate Limiter\n- SSE Stream Proxy"]
     end
 
-    subgraph ControlPlane["DelTix Control Plane Services (Go)"]
-        CompilerSvc["Service 2: Agent Compiler Service (Go)\n- Port 8081\n- NL Parser & Clarification Engine\n- Agent IR Generation & Validator\n- Synthetic Test Suite Generator"]
-        
-        CapPolicySvc["Service 5: Capability & Policy Service (Go)\n- Port 8084\n- Capability Registry (PayPal Contracts)\n- Policy Engine (Spend Caps, Read/Write)\n- Human Approval Gatekeeper\n- PayPal Sandbox REST Adapter"]
+    subgraph ControlPlane["Control Plane (Go)"]
+        CompilerSvc["Service 2: Compiler Service\n- Port 8081\n- NL Parser\n- Agent IR Validator\n- Test Generator"]
+        CapPolicySvc["Service 5: Capability & Policy\n- Port 8084\n- Capability Catalog\n- Policy Engine\n- PayPal Sandbox Adapter"]
     end
 
-    subgraph ExecutionPlane["DelTix AI Agent Execution Plane (Go + Python)"]
-        RuntimeSvc["Service 3: Agent Runtime Service (Go Controller + Python Worker)\n- Go Orchestrator (Port 8082)\n- Python LangGraph State Engine (Port 8085)\n- Distributed Locking via Redis\n- Checkpointing & Resumption\n- Interrupt Handler (Human-in-the-Loop)"]
-
-        MemorySvc["Service 4: Memory Service (Python / FastAPI)\n- Port 8083\n- Mem0 Semantic Memory Manager\n- Tenant/Agent Vector Isolation (Supabase pgvector)\n- Redis Top-k Semantic Cache"]
+    subgraph ExecutionPlane["Execution Plane (Go + Python)"]
+        RuntimeSvc["Service 3: Runtime Service\n- Go Controller (:8082)\n- Python LangGraph (:8085)\n- Redis Lock Manager\n- Checkpointer"]
+        MemorySvc["Service 4: Memory Service\n- Python / FastAPI (:8083)\n- Mem0 Engine\n- Top-k Semantic Cache"]
     end
 
-    subgraph Persistence["Storage, Cache & State Layer"]
-        RedisStore[("Redis 7 (In-Memory Data Store)\n- Sub-millisecond Deduplication\n- Distributed Locks (redsync)\n- Rate Limiting Buckets\n- Top-k Memory Cache")]
-        SupabaseDB[("Supabase (PostgreSQL 16 + pgvector)\n- agent_specs & agent_runs\n- step_checkpoints (JSONB)\n- audit_events & approval_requests\n- pgvector Semantic Memory Store")]
+    subgraph Storage["Persistence & Caching"]
+        RedisStore[("Redis 7\n- Deduplication\n- Redsync Locks\n- Rate Limits")]
+        SupabaseDB[("Supabase\n- PostgreSQL 16\n- pgvector Vectors\n- Checkpoints & Audits")]
     end
 
-    subgraph External["External Integrations"]
-        LLMProvider["LLM API (OpenAI / Anthropic / Gemini)"]
-        PPSandbox["PayPal Developer Sandbox API"]
-        LangSmithCloud["LangSmith Tracing Platform"]
+    subgraph External["External SaaS"]
+        LLMProvider["LLM API\n(OpenAI / Anthropic)"]
+        PPSandbox["PayPal Sandbox API"]
+        LangSmithCloud["LangSmith Cloud"]
     end
 
     Client -->|"HTTP / SSE"| APIGateway
-    APIGateway <-->|"Check Limits & Session"| RedisStore
-    APIGateway -->|"Internal HTTP"| CompilerSvc
-    APIGateway -->|"Internal HTTP"| RuntimeSvc
-    APIGateway -->|"Internal HTTP"| CapPolicySvc
+    APIGateway <-->|"Limits"| RedisStore
+    APIGateway -->|"HTTP"| CompilerSvc
+    APIGateway -->|"HTTP"| RuntimeSvc
+    APIGateway -->|"HTTP"| CapPolicySvc
 
-    CompilerSvc <-->|"Resolve Capabilities & Validate Policies"| CapPolicySvc
-    CompilerSvc <-->|"Prompt / Schema Extraction"| LLMProvider
-    CompilerSvc -->|"Persist Spec & Tests"| SupabaseDB
+    CompilerSvc <-->|"Resolve & Policy"| CapPolicySvc
+    CompilerSvc <-->|"Prompts"| LLMProvider
+    CompilerSvc -->|"Specs"| SupabaseDB
 
-    RuntimeSvc <-->|"Acquire Distributed Lock"| RedisStore
-    RuntimeSvc <-->|"Fetch Agent IR & Executable Config"| SupabaseDB
-    RuntimeSvc <-->|"Retrieve Semantic Context"| MemorySvc
-    RuntimeSvc <-->|"Execute Approved Tool Calls"| CapPolicySvc
-    RuntimeSvc <-->|"State Checkpoints & Run Status"| SupabaseDB
-    RuntimeSvc -->|"Export Spans & Run Traces"| LangSmithCloud
+    RuntimeSvc <-->|"Redsync Lock"| RedisStore
+    RuntimeSvc <-->|"Context"| MemorySvc
+    RuntimeSvc <-->|"Tools"| CapPolicySvc
+    RuntimeSvc <-->|"State"| SupabaseDB
+    RuntimeSvc -->|"Traces"| LangSmithCloud
 
-    CapPolicySvc <-->|"OAuth2 & Idempotent Calls"| PPSandbox
-    CapPolicySvc -->|"Audit Logging & Approvals"| SupabaseDB
+    CapPolicySvc <-->|"OAuth2"| PPSandbox
+    CapPolicySvc -->|"Audit"| SupabaseDB
 
-    MemorySvc <-->|"Top-k Cache"| RedisStore
-    MemorySvc <-->|"Vector Search & Storage"| SupabaseDB
+    MemorySvc <-->|"Cache"| RedisStore
+    MemorySvc <-->|"Vectors"| SupabaseDB
 ```

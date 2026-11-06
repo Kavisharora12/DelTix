@@ -3,7 +3,7 @@
 This diagram visualizes the high-level system context for **DelTix**, showing interactions between users, the DelTix platform, PayPal Sandbox, foundation LLM providers, and LangSmith.
 
 ```mermaid
-flowchart TB
+flowchart LR
     User["Merchant / Developer / Business User"]
     Admin["Compliance & Security Auditor"]
 
