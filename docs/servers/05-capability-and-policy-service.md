@@ -64,6 +64,13 @@ The service is engineered in **Go 1.23** with strict layer separation:
                          │
                          ▼
 ┌────────────────────────────────────────────────────────┐
+│  Circuit Breaker & Reconcile-Before-Retry Layer (Go)   │
+│  - sony/gobreaker (Fast-fail if PayPal 5xx >= 5)       │
+│  - Automatic Query Verification Before Mutating Retry  │
+└────────────────────────┬───────────────────────────────┘
+                         │
+                         ▼
+┌────────────────────────────────────────────────────────┐
 │  Typed PayPal Sandbox Adapters (Go HTTPS REST)         │
 │  - Orders / Captures / Refunds / Transactions          │
 └────────────────────────┬───────────────────────────────┘
@@ -82,12 +89,14 @@ The service is engineered in **Go 1.23** with strict layer separation:
 2. **Policy Engine (`policy/evaluator.go`):** Evaluates spending caps, permission sets, and approval rules against agent metadata and run parameters.
 3. **Approval Token Manager (`policy/approval.go`):** Generates cryptographically secure HMAC tokens for approval requests and verifies them on resumption.
 4. **Redis Idempotency Manager (`policy/idempotency.go`):** Enforces atomic single-execution keys in Redis 7.
-5. **PayPal OAuth2 Client (`adapters/paypal_auth.go`):** Handles client-credentials token caching, thread-safe refreshes, and Sandbox endpoints.
-6. **PayPal Adapters (`adapters/paypal_*.go`):** Typed Go clients for:
+5. **Circuit Breaker Guard (`adapters/circuit_breaker.go`):** Wraps outbound calls using `sony/gobreaker` to trip on 5 consecutive failures, fast-failing calls for 30s to prevent worker starvation.
+6. **Reconcile-Before-Retry Manager (`adapters/reconcile.go`):** Verifies capture/order status prior to re-attempting timed-out mutations to prevent double-charging.
+7. **PayPal OAuth2 Client (`adapters/paypal_auth.go`):** Handles client-credentials token caching, thread-safe refreshes, and Sandbox endpoints.
+8. **PayPal Adapters (`adapters/paypal_*.go`):** Typed Go clients for:
    * `OrdersAdapter`: `orders.create`, `orders.capture`, `orders.get`.
    * `PaymentsAdapter`: `captures.get`, `refunds.create`.
    * `TransactionsAdapter`: `transactions.list`.
-7. **Supabase Audit Logger (`audit/logger.go`):** Records all requests and SHA-256 payload digests to the database.
+9. **Supabase Audit Logger (`audit/logger.go`):** Records all requests and SHA-256 payload digests to the database.
 
 ---
 

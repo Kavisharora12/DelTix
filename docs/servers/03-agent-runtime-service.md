@@ -43,7 +43,7 @@ To balance Go's high-performance concurrency with LangGraph's native Python stat
 │  - Creates Supabase agent_runs record (INITIALIZING)   │
 │  - Manages Supabase Checkpoint Store                   │
 └─────────────────────┬──────────────────────────────────┘
-                      │ Internal HTTP Bridge
+                      │ Internal gRPC Bridge (runtime.proto)
                       ▼
 ┌────────────────────────────────────────────────────────┐
 │  Python LangGraph Execution Worker (Port 8085)         │
@@ -69,7 +69,7 @@ To balance Go's high-performance concurrency with LangGraph's native Python stat
 
 1. **Go Run Coordinator (`runtime/coordinator.go`):** Validates run triggers, initializes run records in Supabase, and coordinates step dispatch.
 2. **Redis Lock Manager (`runtime/lock.go`):** Implements Redsync distributed mutexes preventing duplicate simultaneous executions of a single run.
-3. **LangGraph Worker Bridge (`runtime/worker_client.go`):** Sends step advancement commands to the internal Python worker over HTTP.
+3. **LangGraph Worker Bridge (`runtime/worker_client.go`):** Sends step advancement commands to the internal Python worker over binary gRPC using `runtime.proto`.
 4. **LangGraph StateGraph Builder (`worker/builder.py`):** Dynamically constructs Python LangGraph nodes and edges from `Agent IR` definitions.
 5. **Supabase Checkpoint Manager (`runtime/checkpoint.go`):** Commits state snapshots to Supabase JSONB columns after every step.
 6. **Interrupt & Resume Manager (`runtime/interrupt.go`):** Handles `interrupt()` signals, issues approval tokens, and coordinates state hydration on resumption.

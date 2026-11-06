@@ -444,21 +444,79 @@ flowchart LR
 
 ---
 
-## 13. Failure Detection, Idempotency & Crash Recovery (HLD)
+## 13. Resilience, Circuit Breakers, gRPC & Safe Retries (HLD)
+
+Building reliable financial agents requires strict resilience primitives. DelTix implements **Circuit Breakers**, **gRPC binary bridges**, **safe mutation retries**, and **deterministic fallback routing**:
+
+### A. Circuit Breaker Architecture (PayPal & LLM Guard)
+External provider downtime (e.g. PayPal Sandbox maintenance or LLM 429 rate limits) must not freeze worker threads or deplete token budgets. DelTix embeds the **Circuit Breaker pattern** in Go (using `sony/gobreaker`):
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> CLOSED: Normal Operations
+    
+    CLOSED --> OPEN: Consecutive Failures > 5\n(Fast Fail: 30s Window)
+    OPEN --> HALF_OPEN: Cooldown Elapsed (30s)\n(Probe with 1 Request)
+    
+    HALF_OPEN --> CLOSED: Probe Request Succeeds\n(Reset Counters)
+    HALF_OPEN --> OPEN: Probe Request Fails\n(Re-trip Breaker)
+```
+
+* **CLOSED:** Standard state. Outbound requests flow to PayPal Sandbox and LLM providers.
+* **OPEN:** If 5 consecutive failures or 5xx timeouts occur, the breaker trips. For the next 30 seconds, all subsequent requests **fail immediately** with `503 Service Degraded`, bypassing external network calls, preserving LLM token quota, and protecting connection pools.
+* **HALF-OPEN:** After the 30-second cooldown, the breaker allows a single probe request through. If it succeeds, the breaker resets to `CLOSED`. If it fails, it returns to `OPEN` for another 30 seconds.
+
+### B. Protocol Strategy: Where gRPC vs REST is Used
+DelTix applies a hybrid protocol design tailored to performance and ergonomics:
+
+```mermaid
+flowchart LR
+    ClientUI["Client Dashboard / Browser"] -->|"REST / JSON + SSE\n(Easy browser integration)"| Gateway["API Gateway (Go 1.23)"]
+    Gateway -->|"Internal HTTP/REST"| Compiler["Compiler Svc (Go 1.23)"]
+    Gateway -->|"Internal HTTP/REST"| CapPolicy["Capability & Policy (Go 1.23)"]
+    
+    subgraph Internal_gRPC_Bridge["Internal High-Speed Bridge (gRPC / Protobuf)"]
+        direction LR
+        RuntimeGo["Runtime Controller\n(Go 1.23)"] <-->|"gRPC runtime.proto\n- Binary Serialization\n- Microsecond Latency\n- Bi-directional Streaming"| LangGraphWorker["LangGraph Worker\n(Python 3.11)"]
+    end
+
+    Gateway -->|"Internal HTTP/REST"| RuntimeGo
+```
+
+* **Client ⟷ Edge:** **REST + SSE** (Server-Sent Events) is used for dashboard clients because browsers natively support HTTP/JSON and EventSource streaming without custom WASM/gRPC-Web proxies.
+* **Go Control Plane ⟷ Python LangGraph Worker:** **gRPC with Protobuf (`runtime.proto`)** is used for internal agent execution. Passing graph state dictionaries, step commands, and LangSmith spans between Go and Python via binary Protobuf eliminates JSON serialization bottlenecks and enforces strict multi-language compile-time type safety.
+* **Internal Go Services:** Lightweight **HTTP/REST** for simplicity and independent container debugging.
+
+### C. Safe Retries vs The Financial Mutation Trap
+In financial workflows, blindly retrying a failed or timed-out request is dangerous. DelTix enforces a strict distinction:
+1. **Idempotent Read Operations (`paypal.orders.get`, `paypal.transactions.list`, `llm.reasoning`):**
+   * Automatically retried with **Exponential Jittered Backoff** (1s, 2s, 4s...) up to `max_retries`.
+2. **Mutating Financial Operations (`paypal.orders.capture`, `paypal.refunds.create`):**
+   * **The Financial Trap:** If a network drop occurs after PayPal processes a capture but before DelTix receives the response, blindly retrying could double-charge the merchant!
+   * **The DelTix Safety Protocol:** 
+     1. Injects `PayPal-Request-Id: hash(run_id + step_idx)`.
+     2. Enforces **Reconcile-Before-Retry**: Before attempting a second dispatch, the adapter automatically queries `paypal.orders.get` or `paypal.captures.get`. If PayPal already recorded the transaction as completed, DelTix recovers the existing ID and marks the step succeeded without issuing a second payment mutation.
+
+### D. Fallback Routing in Agent IR
+If retries are exhausted or the Circuit Breaker is tripped, the execution graph does not crash. Every node in the `Agent IR` supports an explicit fallback transition:
+* If `paypal.orders.get` fails 3 times ➡️ Graph routes to `node_alert_operator`, transitioning run status cleanly to `PAUSED_FOR_APPROVAL` or generating an error diagnosis report for operator review.
 
 ```mermaid
 flowchart LR
     StartNode["Execute Node Step"] --> PreCheckpoint["1. Write Pre-Run\nCheckpoint to Supabase"]
-    PreCheckpoint --> InvokeStep["2. Dispatch Node\nExecution"]
+    PreCheckpoint --> InvokeStep["2. Dispatch Node\nExecution via gRPC"]
     
     InvokeStep --> Outcome{"3. Execution\nOutcome?"}
     Outcome -->|Success| SaveStep["4. Commit Output State\nAdvance Graph Transition"]
     SaveStep --> NextStep["Next Graph Node"]
 
-    Outcome -->|5xx / Timeout| RetryCheck{"5. Retries < Max?"}
-    RetryCheck -->|Yes| MutationCheck{"Mutation Action?"}
+    Outcome -->|5xx / Timeout| BreakerCheck{"Circuit Breaker\nTripped?"}
+    BreakerCheck -->|Yes| RouteCompensation["Circuit Open:\nFast-fail to Fallback Node"]
+    BreakerCheck -->|No| RetryCheck{"5. Retries < Max?"}
     
-    MutationCheck -->|Yes - Payment| ReconcileProvider["Safety Check:\nQuery Provider First\n(Verify if capture executed)"]
+    RetryCheck -->|Yes| MutationCheck{"Mutation Action?"}
+    MutationCheck -->|Yes - Payment| ReconcileProvider["Safety Check:\nQuery Provider First\n(Reconcile-Before-Retry)"]
     ReconcileProvider -->|Already Processed| SaveStep
     ReconcileProvider -->|Not Processed| BackoffWait["Exponential Backoff\n(1s, 2s, 4s...)"]
     BackoffWait --> InvokeStep
@@ -468,7 +526,7 @@ flowchart LR
     Outcome -->|Fatal 4xx| ErrorRoute
 
     ErrorRoute --> HasFallback{"Has Fallback Edge?"}
-    HasFallback -->|Yes| RouteCompensation["Route to Compensation\nNode Handler"]
+    HasFallback -->|Yes| RouteCompensation
     RouteCompensation --> NextStep
     HasFallback -->|No| TerminateFail["Halt Run (Status: FAILED)\nRelease Redis Mutex"]
 
@@ -861,7 +919,9 @@ stateDiagram-v2
     COMPLETED --> [*]: Release Redis Lock
 ```
 
-### Go Controller to Python LangGraph Bridge Protocol (LLD)
+### Go Controller to Python LangGraph gRPC Bridge Protocol (LLD)
+
+The internal execution bridge between the Go Control Plane and the Python LangGraph Worker operates over high-speed binary **gRPC**:
 
 ```mermaid
 sequenceDiagram
@@ -874,29 +934,86 @@ sequenceDiagram
     participant LangSmith as LangSmith Telemetry
 
     GoRun->>Redis: Redsync.Lock("lock:run_01j7")
-    GoRun->>Worker: POST /v1/graph/step (current_state, node_id)
+    GoRun->>Worker: gRPC ExecuteStep(StepRequest)
     
     Worker->>LangSmith: StartSpan(run_id, node_id)
     Worker->>Worker: Evaluate Node Logic (LLM / Calculation)
     
     alt Node requires Tool Execution
-        Worker->>GoRun: POST /internal/v1/tools/dispatch (tool_id, params)
+        Worker->>GoRun: gRPC DispatchTool(ToolRequest)
         GoRun->>Policy: POST /internal/v1/capabilities/execute
         Policy-->>GoRun: Tool Result JSON
-        GoRun-->>Worker: HTTP 200 (Tool Output)
+        GoRun-->>Worker: ToolResponse(result_json)
     end
     
     Worker->>LangSmith: EndSpan(metrics, latency_ms)
-    Worker-->>GoRun: Step Complete (new_state, next_node_id)
+    Worker-->>GoRun: StepResponse(new_state, next_node_id, is_sensitive)
     
     GoRun->>DB: INSERT INTO agent_run_checkpoints (state_payload)
-    GoRun->>GoRun: Check if next_node_id == SENSITIVE
+    GoRun->>GoRun: Check if is_sensitive == true
     alt Next Node is Sensitive Action
         GoRun->>DB: UPDATE agent_runs SET status='PAUSED_FOR_APPROVAL'
         GoRun->>Redis: Redsync.Unlock("lock:run_01j7")
     else Graph Continues
-        GoRun->>Worker: POST /v1/graph/step (next_node_id)
+        GoRun->>Worker: gRPC ExecuteStep(next_node_id)
     end
+```
+
+#### Protocol Buffer Contract: `runtime.proto`
+```protobuf
+syntax = "proto3";
+
+package deltix.runtime.v1;
+
+option go_package = "github.com/deltix/runtime/v1/pb;runtimev1";
+
+service AgentExecutionService {
+  // Executes a single workflow step or sub-graph turn
+  rpc ExecuteStep (StepRequest) returns (StepResponse);
+  
+  // Resumes an interrupted run with a verified approval token
+  rpc ResumeExecution (ResumeRequest) returns (StepResponse);
+  
+  // Callback stream from Python worker to Go host for tool execution
+  rpc DispatchTool (ToolRequest) returns (ToolResponse);
+}
+
+message StepRequest {
+  string run_id = 1;
+  string tenant_id = 2;
+  string node_id = 3;
+  string state_json = 4;
+  string agent_ir_json = 5;
+}
+
+message StepResponse {
+  string run_id = 1;
+  string completed_node_id = 2;
+  string next_node_id = 3;
+  string updated_state_json = 4;
+  bool is_interrupted = 5;
+  string interrupt_reason = 6;
+  bool is_terminal = 7;
+}
+
+message ResumeRequest {
+  string run_id = 1;
+  string approval_token = 2;
+  string decision = 3; // "APPROVED" or "REJECTED"
+  string state_checkpoint_json = 4;
+}
+
+message ToolRequest {
+  string run_id = 1;
+  string capability_id = 2;
+  string parameters_json = 3;
+}
+
+message ToolResponse {
+  bool success = 1;
+  string result_json = 2;
+  string error_message = 3;
+}
 ```
 
 ---
@@ -984,6 +1101,63 @@ flowchart LR
     OAuthManager -->|"POST /v2/payments/captures/{id}/refund"| EndpointRefunds
     OAuthManager -->|"GET /v1/reporting/transactions"| EndpointTxns
     OAuthManager -->|"GET /v2/payments/captures/{id}"| EndpointCaptures
+```
+
+### Go Circuit Breaker & Reconcile-Before-Retry Implementation (LLD)
+
+```go
+package adapters
+
+import (
+    "context"
+    "fmt"
+    "time"
+    "github.com/sony/gobreaker"
+)
+
+type PayPalAdapter struct {
+    cb     *gobreaker.CircuitBreaker
+    client *PayPalHTTPClient
+}
+
+func NewPayPalAdapter(client *PayPalHTTPClient) *PayPalAdapter {
+    settings := gobreaker.Settings{
+        Name:        "PayPal-Sandbox-Breaker",
+        MaxRequests: 3,                // Max half-open probe requests
+        Interval:    60 * time.Second, // Cyclic failure count window
+        Timeout:     30 * time.Second, // Open cooldown duration
+        ReadyToTrip: func(counts gobreaker.Counts) bool {
+            return counts.ConsecutiveFailures >= 5
+        },
+    }
+    return &PayPalAdapter{
+        cb:     gobreaker.NewCircuitBreaker(settings),
+        client: client,
+    }
+}
+
+// ExecuteWithCircuitBreaker wraps PayPal API calls with Circuit Breaker & Idempotent Safety
+func (a *PayPalAdapter) CreateRefund(ctx context.Context, captureID string, amount float64, idempKey string) (*RefundResult, error) {
+    result, err := a.cb.Execute(func() (interface{}, error) {
+        // Step 1: Attempt Refund with Idempotency Key
+        res, err := a.client.PostRefund(ctx, captureID, amount, idempKey)
+        if err != nil && isNetworkTimeout(err) {
+            // Step 2: The Golden Rule: Reconcile-Before-Retry
+            // Query capture details to verify if PayPal processed the refund during timeout
+            capture, queryErr := a.client.GetCapture(ctx, captureID)
+            if queryErr == nil && capture.RefundedAmount >= amount {
+                return &RefundResult{Status: "ALREADY_COMPLETED", RefundID: capture.LatestRefundID}, nil
+            }
+            return nil, fmt.Errorf("transient timeout on refund, reconciliation pending: %w", err)
+        }
+        return res, err
+    })
+
+    if err != nil {
+        return nil, fmt.Errorf("paypal adapter execution failed: %w", err)
+    }
+    return result.(*RefundResult), nil
+}
 ```
 
 ---

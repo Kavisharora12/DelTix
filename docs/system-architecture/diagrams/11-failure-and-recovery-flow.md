@@ -1,37 +1,38 @@
 # 11 — Failure and Recovery Flow Diagram
 
-This diagram visualizes failure detection, safe retry evaluations, checkpoint rollbacks, and process crash recovery in **DelTix** oriented Left to Right.
+This diagram visualizes failure detection, circuit breaker fast-failing, safe retry evaluations, reconcile-before-retry, and process crash recovery in **DelTix** oriented Left to Right.
 
 ```mermaid
 flowchart LR
-    StartNode["Execute Node"] --> CheckpointBefore["1. Write Pre-run Checkpoint\n(Supabase: RUNNING)"]
-    CheckpointBefore --> RunNode["2. Invoke Node Handler\n(Go / Python)"]
-    RunNode --> ResultCheck{"3. Result?"}
-
-    ResultCheck -->|Success| SaveSuccess["4. Save Output to Supabase\nAdvance Graph Edge"]
-    SaveSuccess --> NextStep["Next Node"]
-
-    ResultCheck -->|Transient 5xx / Timeout| EvalRetry{"4. Attempts < Max?"}
+    StartNode["Execute Node Step"] --> PreCheckpoint["1. Write Pre-Run\nCheckpoint to Supabase"]
+    PreCheckpoint --> InvokeStep["2. Dispatch Node\nExecution via gRPC"]
     
-    EvalRetry -->|Yes| IdempotencyCheck{"Mutation Operation?"}
-    IdempotencyCheck -->|Yes - Payment| ReconcileFirst["Verify Provider State First\n(Read before mutating)"]
-    ReconcileFirst -->|Already Processed| SaveSuccess
-    ReconcileFirst -->|Not Processed| Backoff["Exponential Backoff"]
-    Backoff --> RunNode
-    IdempotencyCheck -->|No - Safe Read| Backoff
+    InvokeStep --> Outcome{"3. Execution\nOutcome?"}
+    Outcome -->|Success| SaveStep["4. Commit Output State\nAdvance Graph Transition"]
+    SaveStep --> NextStep["Next Graph Node"]
 
-    EvalRetry -->|No - Exceeded| FailStep["5. Trigger Node Error"]
-    ResultCheck -->|Fatal 4xx| FailStep
+    Outcome -->|5xx / Timeout| BreakerCheck{"Circuit Breaker\nTripped?"}
+    BreakerCheck -->|Yes - Open| RouteCompensation["Circuit Open:\nFast-fail to Fallback Node"]
+    BreakerCheck -->|No - Closed| RetryCheck{"5. Retries < Max?"}
+    
+    RetryCheck -->|Yes| MutationCheck{"Mutation Action?"}
+    MutationCheck -->|Yes - Payment| ReconcileProvider["Safety Check:\nQuery Provider First\n(Reconcile-Before-Retry)"]
+    ReconcileProvider -->|Already Processed| SaveStep
+    ReconcileProvider -->|Not Processed| BackoffWait["Exponential Backoff\n(1s, 2s, 4s...)"]
+    BackoffWait --> InvokeStep
+    MutationCheck -->|No - Safe Read| BackoffWait
 
-    FailStep --> FallbackCheck{"Has Fallback Edge?"}
-    FallbackCheck -->|Yes| RouteFallback["Route to Compensation Node"]
-    RouteFallback --> NextStep
-    FallbackCheck -->|No| SuspendFail["Halt Execution\nStatus: FAILED\nRelease Redis Lock"]
+    RetryCheck -->|No - Exceeded| ErrorRoute["6. Trigger Node Fallback"]
+    Outcome -->|Fatal 4xx| ErrorRoute
 
-    subgraph CrashRecovery["Process Crash Recovery"]
-        Crash["Worker Dies Mid-Run"] -.-> Reboot["Container Reboots"]
-        Reboot --> Scan["Query Supabase for stuck runs"]
-        Scan --> Restore["Restore Last Committed Checkpoint"]
-        Restore --> CheckpointBefore
+    ErrorRoute --> HasFallback{"Has Fallback Edge?"}
+    HasFallback -->|Yes| RouteCompensation["Route to Compensation\nNode Handler"]
+    RouteCompensation --> NextStep
+    HasFallback -->|No| TerminateFail["Halt Run (Status: FAILED)\nRelease Redis Mutex"]
+
+    subgraph WorkerReboot["Process Crash / Reboot Sweep"]
+        CrashPoint["Container Reboots Mid-Execution"] -.-> StartupSweep["Startup Background Sweep\n(Query runs with status='RUNNING')"]
+        StartupSweep --> HydrateLastCheckpoint["Hydrate Last Committed\nCheckpoint from Supabase"]
+        HydrateLastCheckpoint --> PreCheckpoint
     end
 ```
