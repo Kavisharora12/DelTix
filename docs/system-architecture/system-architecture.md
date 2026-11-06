@@ -1,7 +1,7 @@
 # DelTix — Master System Architecture Document
 **High-Level Design (HLD) & Low-Level Design (LLD)**
 
-* **Document Version:** 1.0.0
+* **Document Version:** 2.0.0
 * **Target Audience:** Principal Architects, Systems Engineers, Security Auditors, Workstream Leads
 * **Status:** Final Architectural Specification (Pre-Implementation Baseline)
 * **Project Name:** **DelTix**
@@ -11,15 +11,61 @@
 
 # Part A — High-Level Design (HLD)
 
-## 1. Project Overview
+## 1. Project Overview & System Context
 
 **DelTix** is an AI Agent Compiler and Runtime Platform engineered specifically for PayPal-powered financial operations. 
 
 Traditional AI agent development forces engineering teams to repeatedly implement custom tool wrappers, volatile prompt templates, brittle state management, unverified permissions, and ad-hoc error handling for every new agent. DelTix replaces this fragmented workflow with an **agent engineering platform**. 
 
-Developers describe a financial task in natural language. DelTix parses requirements, synthesizes a strongly typed **Agent Intermediate Representation (Agent IR)**, validates graph integrity, resolves capabilities against a registered catalog, enforces deterministic policies, executes synthetic test scenarios, and runs the validated agent on a shared, stateful runtime powered by **Go**, **Python (LangGraph)**, **Mem0**, **Redis**, **Supabase (PostgreSQL 16 + pgvector)**, and the **PayPal Developer Sandbox**.
+Developers describe a financial task in natural language. DelTix parses requirements, synthesizes a strongly typed **Agent Intermediate Representation (Agent IR)**, validates graph integrity, resolves capabilities against a registered catalog, enforces deterministic policies, executes synthetic test scenarios, and runs the validated agent on a shared, stateful runtime powered by **Go 1.23**, **Python 3.11 (LangGraph)**, **Mem0**, **Redis 7**, **Supabase (PostgreSQL 16 + pgvector)**, and the **PayPal Developer Sandbox**.
 
-The system context is illustrated in [`diagrams/01-system-context.md`](./diagrams/01-system-context.md).
+### System Context Diagram (HLD)
+
+```mermaid
+flowchart LR
+    User["Merchant / Developer\n(Prompt & Approvals)"]
+    Auditor["Compliance Auditor\n(Audit Inspection)"]
+
+    subgraph DelTixPlatform["DelTix Platform Ecosystem"]
+        direction LR
+        Ingress["API Gateway\n(Go 1.23 / Port 8080)"]
+        Compiler["Agent Compiler Svc\n(Go 1.23 / Port 8081)"]
+        Runtime["Agent Runtime Svc\n(Go Controller + Python LangGraph)"]
+        Policy["Capability & Policy Svc\n(Go 1.23 / Port 8084)"]
+        Memory["Memory Service\n(Python FastAPI + Mem0)"]
+        Cache[("Redis 7\nLocks & Cache")]
+        DB[("Supabase\nPostgres 16 + pgvector")]
+
+        Ingress --> Compiler
+        Ingress --> Runtime
+        Ingress --> Policy
+        Compiler <--> Policy
+        Compiler --> DB
+        Runtime <--> Policy
+        Runtime <--> Memory
+        Runtime <--> Cache
+        Runtime --> DB
+        Policy <--> Cache
+        Policy --> DB
+        Memory <--> Cache
+        Memory <--> DB
+    end
+
+    subgraph ExternalEcosystem["External Providers & Integrations"]
+        direction LR
+        PayPal["PayPal Sandbox API\n- Orders v2\n- Captures\n- Refunds\n- Disputes v1"]
+        LLM["Foundation LLMs\n- OpenAI / Anthropic\n- Structured JSON Mode"]
+        LangSmith["LangSmith Cloud\n- Tracing & Spans\n- Latency Diagnostics"]
+    end
+
+    User -->|"Submit Prompts / Approve Actions"| Ingress
+    Auditor -->|"Query Immutable Audit Trail"| Ingress
+
+    Compiler <-->|"IR Generation & Extraction"| LLM
+    Runtime <-->|"Node Reasoning Turns"| LLM
+    Runtime -->|"Async Telemetry Spans"| LangSmith
+    Policy <-->|"OAuth2 & Idempotent Calls"| PayPal
+```
 
 ---
 
@@ -79,67 +125,124 @@ DelTix solves this by building the compiler and runtime infrastructure once, all
 
 ---
 
-## 6. System Architecture
+## 6. End-to-End Container & Network Topology (HLD)
 
-DelTix is structured as a decoupled microservices architecture partitioned into an **Edge Tier**, a **Control Plane**, an **Execution Plane**, and a **Storage Tier**.
+DelTix is partitioned into an **Edge Tier**, a **Go Control Plane**, a **Python AI Execution Plane**, and a **Storage Tier**.
 
-Refer to [`diagrams/02-container-architecture.md`](./diagrams/02-container-architecture.md) for the container layout.
+```mermaid
+flowchart LR
+    Client["Client / Web UI\n(Port 80/443)"]
 
-```text
-                                 [ Client Dashboard / API ]
-                                             │
-                                             ▼
-                                  ┌────────────────────┐
-                                  │   1. API Gateway   │
-                                  │    (Go / 8080)     │
-                                  └──────────┬─────────┘
-                                             │
-               ┌─────────────────────────────┼────────────────────────────┐
-               │                             │                            │
-               ▼                             ▼                            ▼
-    ┌────────────────────┐        ┌────────────────────┐        ┌────────────────────┐
-    │ 2. Compiler Svc    │        │ 3. Runtime Svc     │        │ 5. Capability &    │
-    │   (Go / 8081)      │◄──────►│ (Go Controller +   │◄──────►│    Policy Svc      │
-    │                    │        │  Python LangGraph) │        │   (Go / 8084)      │
-    └──────────┬─────────┘        └──────────┬─────────┘        └──────────┬─────────┘
-               │                             │                             │
-               │                             ▼                             │
-               │                  ┌────────────────────┐                   │
-               │                  │  4. Memory Svc     │                   │
-               │                  │ (Python Mem0/8083) │                   │
-               │                  └──────────┬─────────┘                   │
-               │                             │                             │
-               ▼                             ▼                             ▼
-    ┌────────────────────────────────────────────────────────────────────────┐
-    │          Redis 7 (In-Memory Deduplication, Redsync Locks, Rate Limits) │
-    ├────────────────────────────────────────────────────────────────────────┤
-    │          Supabase (PostgreSQL 16 + pgvector - System of Record)        │
-    │  (agent_specs, agent_runs, checkpoints, audit_events, approvals)      │
-    └────────────────────────────────────────────────────────────────────────┘
+    subgraph EdgeTier["Edge Ingress Tier"]
+        direction LR
+        APIGateway["1. API Gateway\n(Go 1.23)\nPort 8080\n- JWT Authentication\n- Tenant Context\n- Redis Token-Bucket Limiter\n- SSE Stream Proxy"]
+    end
+
+    subgraph GoControlPlane["Go Control Plane"]
+        direction LR
+        CompilerSvc["2. Agent Compiler Svc\n(Go 1.23)\nPort 8081\n- Prompt Parser\n- JSON Schema Validator\n- Graph Topology Analyzer\n- Synthetic Test Runner"]
+        
+        CapPolicySvc["5. Capability & Policy Svc\n(Go 1.23)\nPort 8084\n- Capability Registry\n- Go Policy Engine\n- Redis Idempotency Gate\n- PayPal Sandbox Adapter"]
+    end
+
+    subgraph PythonAIPlane["Python AI Execution Plane"]
+        direction LR
+        RuntimeSvc["3. Agent Runtime Svc\n(Go Controller :8082 +\nPython LangGraph :8085)\n- StateGraph Engine\n- Redsync Run Mutex\n- Checkpointer\n- HITL Interrupts"]
+        
+        MemorySvc["4. Memory Service\n(Python 3.11 / FastAPI)\nPort 8083\n- Mem0 Vector Framework\n- Supabase pgvector\n- Redis Top-k Cache"]
+    end
+
+    subgraph StorageTier["Data & Cache Tier"]
+        direction LR
+        RedisStore[("Redis 7 (In-Memory)\n- Redsync Mutexes\n- Deduplication (TTL 24h)\n- Rate Limit Buckets\n- Top-k Memory Cache")]
+        
+        SupabaseDB[("Supabase (PostgreSQL 16)\n- agent_specs (JSONB)\n- agent_runs & checkpoints\n- approval_requests\n- audit_events (Append-only)\n- mem0_memories (pgvector)")]
+    end
+
+    subgraph CloudIntegrations["External SaaS Providers"]
+        direction LR
+        PPSandbox["PayPal Sandbox API\n(api-m.sandbox.paypal.com)"]
+        LLMProvider["Foundation LLM API\n(OpenAI / Anthropic)"]
+        LangSmithCloud["LangSmith Cloud\n(api.smith.langchain.com)"]
+    end
+
+    Client -->|"HTTP POST / SSE"| APIGateway
+    APIGateway <-->|"Check Limits"| RedisStore
+    APIGateway -->|"HTTP :8081"| CompilerSvc
+    APIGateway -->|"HTTP :8082"| RuntimeSvc
+    APIGateway -->|"HTTP :8084"| CapPolicySvc
+
+    CompilerSvc <-->|"Resolve & Policy"| CapPolicySvc
+    CompilerSvc <-->|"Structured Prompt"| LLMProvider
+    CompilerSvc -->|"Save Spec"| SupabaseDB
+
+    RuntimeSvc <-->|"Redsync Mutex"| RedisStore
+    RuntimeSvc <-->|"Semantic Context"| MemorySvc
+    RuntimeSvc <-->|"Execute Tools"| CapPolicySvc
+    RuntimeSvc <-->|"Checkpoints"| SupabaseDB
+    RuntimeSvc -->|"Spans & Traces"| LangSmithCloud
+
+    CapPolicySvc <-->|"SETNX Key"| RedisStore
+    CapPolicySvc <-->|"OAuth2 REST"| PPSandbox
+    CapPolicySvc -->|"Audit Record"| SupabaseDB
+
+    MemorySvc <-->|"Top-k Cache"| RedisStore
+    MemorySvc <-->|"Vector Search"| SupabaseDB
 ```
 
 ---
 
 ## 7. Component Responsibilities
 
-1. **API Gateway (Service 1 — Go):** Ingress controller, JWT authentication, tenant context injection, Redis-backed rate limiting, and Server-Sent Events (SSE) streaming proxy.
-2. **Agent Compiler Service (Service 2 — Go):** Ingests natural-language prompts, manages clarification dialogs, generates and validates Agent IR, verifies graph topologies, and orchestrates synthetic test generation.
-3. **Agent Runtime Service (Service 3 — Go Controller + Python LangGraph Worker):** Translates Agent IR into LangGraph execution graphs, manages step transitions, executes node handlers, acquires Redis distributed locks, persists step checkpoints to Supabase, pauses for human approval, and resumes execution.
-4. **Memory Service (Service 4 — Python / FastAPI):** Interfaces with Mem0 and Supabase `pgvector` to manage semantic long-term memory, merchant preferences, and case context with strict tenant isolation.
-5. **Capability and Policy Service (Service 5 — Go):** Maintains the Capability Registry, enforces deterministic policy limits, generates idempotency tokens in Redis, gates sensitive actions with approval tokens, and interfaces with PayPal Sandbox.
+| Service | Primary Technology | Core Architectural Responsibilities |
+| :--- | :--- | :--- |
+| **1. API Gateway** | **Go 1.23** | Ingress TLS termination, JWT verification, tenant context injection, Redis token-bucket rate limiting, reverse proxy routing, and real-time SSE streaming. |
+| **2. Agent Compiler Service** | **Go 1.23** | Natural-language prompt parsing, clarification dialog generation, `Agent IR v1.0` JSON Schema validation, graph cycle & reachability analysis, synthetic test generation, and Supabase spec persistence. |
+| **3. Agent Runtime Service** | **Go 1.23 + Python 3.11 (LangGraph)** | Dual-component execution engine. Go controller manages Redis Redsync run mutexes and Supabase checkpoints. Python LangGraph worker drives dynamic state graph execution, conditional edges, loops, and human-in-the-loop interruptions. |
+| **4. Memory Service** | **Python 3.11 / FastAPI (Mem0)** | Long-term semantic memory, merchant preference extraction, cosine similarity vector search over Supabase `pgvector`, and Redis top-k caching. |
+| **5. Capability & Policy Service** | **Go 1.23** | Immutable Capability Registry, deterministic Go spending limits and read-only policy evaluation, Redis `SETNX` idempotency keys, human approval token generation, and typed PayPal Sandbox adapters. |
 
 ---
 
-## 8. Service Boundaries
+## 8. Service Boundaries & Interaction Matrix (HLD)
 
-The boundary contracts between services are non-overlapping:
+The five services maintain strict, non-overlapping ownership boundaries. Communication is governed by versioned REST contracts over internal Docker networks:
 
-* **Compiler vs Runtime:** The Compiler emits static, versioned `Agent IR`. The Runtime never alters the IR; it only executes it.
-* **Control Plane vs LangGraph Worker:** The Go runtime manages lifecycle, persistence, and external tool authorization; the Python LangGraph engine handles node-level state transitions and LLM agent loops.
-* **Memory vs Operational State:** Mem0 manages semantic, unstructured text memory stored in Supabase `pgvector`. Supabase transactional tables store authoritative run state, monetary values, and audit logs. Mem0 is **never** queried for authoritative payment status.
-* **Runtime vs PayPal:** The Runtime never calls PayPal directly. It requests tool execution via the Capability & Policy Service, which performs policy and idempotency checks before invoking PayPal.
+```mermaid
+flowchart LR
+    subgraph Ingress["Ingress"]
+        GW["Service 1: API Gateway (Go)"]
+    end
 
-The complete inter-service interaction model is defined in [`diagrams/09-service-interaction.md`](./diagrams/09-service-interaction.md).
+    subgraph Compilation["Compilation"]
+        Comp["Service 2: Agent Compiler (Go)"]
+    end
+
+    subgraph Execution["Execution"]
+        Runtime["Service 3: Agent Runtime (Go + Python)"]
+    end
+
+    subgraph MemoryLayer["Memory"]
+        Mem["Service 4: Memory Service (Python)"]
+    end
+
+    subgraph CapabilityLayer["Security & Integration"]
+        Cap["Service 5: Capability & Policy (Go)"]
+    end
+
+    GW -->|"1. POST /v1/agents/compile"| Comp
+    GW -->|"2. POST /v1/runs"| Runtime
+    GW -->|"3. POST /v1/approvals/decision"| Cap
+    GW -->|"4. GET /v1/memory/{agent_id}"| Mem
+
+    Comp <-->|"A. POST /v1/capabilities/resolve"| Cap
+    Comp <-->|"B. POST /v1/policies/validate"| Cap
+    
+    Runtime <-->|"C. POST /v1/memory/retrieve"| Mem
+    Runtime <-->|"D. POST /v1/capabilities/execute"| Cap
+    
+    Cap -->|"E. POST /v1/runs/{id}/resume"| Runtime
+```
 
 ---
 
@@ -151,105 +254,331 @@ The complete inter-service interaction model is defined in [`diagrams/09-service
 | **Foundation LLM Provider** | Intent extraction, Agent IR generation, and node reasoning | API Key (Server-side environment) | HTTPS REST (JSON Schema / Tool Calling) | Exponential backoff on rate limits (429). |
 | **LangSmith** | Distributed tracing, evaluation, and latency profiling | `LANGSMITH_API_KEY` | HTTPS REST (Asynchronous background exporter) | Non-blocking telemetry drop on failure. |
 
-The PayPal integration sequence is documented in [`diagrams/07-paypal-integration-flow.md`](./diagrams/07-paypal-integration-flow.md).
-
 ---
 
 ## 10. Main Data Flows
 
-### A. Agent Compilation Flow
-1. User submits natural-language prompt via API Gateway.
-2. Compiler Service invokes LLM with structured output to extract constraints and draft Agent IR.
-3. Compiler deterministically validates JSON Schema and graph topology in Go.
-4. Compiler queries Capability & Policy Service to resolve tool bindings.
-5. Compiler queries Capability & Policy Service to validate policy limits.
-6. Compiler generates synthetic test suite and executes test runs.
-7. Compiler persists validated `Agent IR` to Supabase `agent_specs` and returns a readiness scorecard to the user.
-*(Detailed in [`diagrams/03-agent-compilation-pipeline.md`](./diagrams/03-agent-compilation-pipeline.md))*
+### A. Agent Compilation Data Flow (HLD)
 
-### B. Agent Execution & Approval Flow
-1. User or external event triggers an agent run with runtime inputs.
-2. Go Runtime Controller acquires a Redis `redsync` distributed lock for the `run_id`.
-3. Go Runtime loads the compiled Agent IR from Supabase and passes it to the Python LangGraph Worker.
-4. LangGraph executes nodes sequentially, querying Memory Service for relevant past patterns.
-5. Upon reaching a sensitive tool (e.g. `paypal.refunds.create`), the Runtime Service requests permission from the Capability & Policy Service.
-6. Policy engine detects `is_sensitive == true`, generates an `approval_request`, commits a checkpoint to Supabase, releases the Redis lock, and transitions run status to `PAUSED_FOR_APPROVAL`.
-7. Operator approves the action via Dashboard.
-8. Runtime Service re-acquires the Redis lock, resumes the graph from the exact checkpoint, and dispatches the idempotent tool call.
-9. Output is returned, audit logs are appended to Supabase, and run status becomes `COMPLETED`.
-*(Detailed in [`diagrams/04-agent-execution-lifecycle.md`](./diagrams/04-agent-execution-lifecycle.md) and [`diagrams/08-approval-and-policy-flow.md`](./diagrams/08-approval-and-policy-flow.md))*
+```mermaid
+flowchart LR
+    NLPrompt["1. User Prompt in NL\n(e.g., 'Reconcile dispute items')"] --> Extraction["2. LLM Intent Extraction\n(Structured JSON Output)"]
+    
+    Extraction --> ClarifyCheck{"3. Ambiguities\nDetected?"}
+    ClarifyCheck -->|Yes| ClarifyDialog["Emit Clarification Dialog\nto User via Gateway"]
+    ClarifyDialog --> NLPrompt
+    
+    ClarifyCheck -->|No| IRSynthesis["4. Agent IR Synthesis\n(Draft Specification)"]
+    IRSynthesis --> SchemaValidator["5. Go JSON Schema\nValidator (agent_ir_v1)"]
+    
+    SchemaValidator --> TopologyAnalyzer["6. Go Graph DFS Analyzer\n(Detect Cycles & Dead Ends)"]
+    TopologyAnalyzer --> CapResolver["7. Capability Resolution\n(Query Service 5 Catalog)"]
+    
+    CapResolver --> PolicyGate["8. Policy Engine Verification\n(Check Limits & Read-Only)"]
+    PolicyGate --> TestSuite["9. Synthetic Test Suite\n(Positive, Negative, Breach)"]
+    
+    TestSuite --> MockSandbox["10. Mock Execution Harness\n(Pre-flight Validation)"]
+    MockSandbox --> SupabaseSpec[("11. Persist to Supabase\n(agent_specs Table)")]
+```
+
+### B. Agent Runtime Execution & Human Approval Sequence (HLD)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Merchant / Operator
+    participant UI as Dashboard / Stream
+    participant GW as API Gateway (Go)
+    participant Run as Runtime Controller (Go)
+    participant Redis as Redis 7 (Mutex & Idempotency)
+    participant LangGraph as LangGraph Worker (Python)
+    participant Policy as Capability & Policy Svc (Go)
+    participant DB as Supabase (State & Checkpoints)
+    participant PayPal as PayPal Sandbox API
+
+    User->>UI: Trigger Agent Run (Inputs)
+    UI->>GW: POST /v1/runs (spec_id, inputs)
+    GW->>Run: POST /internal/v1/runs
+    Run->>Redis: Acquire Redsync Mutex (lock:run_id)
+    Run->>DB: INSERT INTO agent_runs (status='RUNNING')
+    Run->>LangGraph: POST /v1/graph/start (Agent IR, inputs)
+
+    loop Node Step Advancement
+        LangGraph->>LangGraph: Execute Active Node
+        LangGraph->>Run: Save Step Checkpoint
+        Run->>DB: INSERT INTO agent_run_checkpoints
+    end
+
+    Note over LangGraph,Policy: Reached Sensitive Tool (e.g. paypal.refunds.create)
+    LangGraph->>Run: Dispatch Tool Execution
+    Run->>Policy: POST /v1/capabilities/execute (amount=$45.00)
+    Policy->>Policy: Evaluate Policy: Sensitive == true -> Requires Human Sign-off
+    Policy->>DB: INSERT INTO approval_requests (status='PENDING')
+    Policy-->>Run: 202 Accepted (Status: APPROVAL_REQUIRED, approval_id)
+    
+    Run->>LangGraph: Yield Interrupt(HUMAN_APPROVAL_PAUSE)
+    Run->>DB: UPDATE agent_runs SET status='PAUSED_FOR_APPROVAL'
+    Run->>Redis: Release Redsync Mutex (lock:run_id)
+    Run-->>GW: Event: Run Paused (Approval ID)
+    GW-->>UI: Display Human Approval Modal
+
+    User->>UI: Clicks "Approve" (JWT Signed)
+    UI->>GW: POST /v1/approvals/{approval_id}/decision (decision="APPROVED")
+    GW->>Policy: ProcessApprovalDecision(decision="APPROVED")
+    Policy->>DB: UPDATE approval_requests SET status='APPROVED'
+    Policy->>Run: POST /internal/v1/runs/{run_id}/resume (approval_token)
+    
+    Run->>Redis: Reacquire Redsync Mutex (lock:run_id)
+    Run->>DB: SELECT last_checkpoint FROM agent_run_checkpoints
+    Run->>LangGraph: POST /v1/graph/resume (checkpoint, approval_token)
+    LangGraph->>Run: Dispatch Authorized Tool Call
+    Run->>Policy: POST /v1/capabilities/execute (with approval_token)
+    
+    Policy->>Redis: SETNX idempotency:run_id:step_idx
+    Policy->>PayPal: POST /v2/payments/captures/{id}/refund (PayPal-Request-Id)
+    PayPal-->>Policy: 201 Created (Refund ID)
+    Policy->>DB: INSERT INTO audit_events (status='SUCCESS')
+    Policy-->>Run: Tool Result
+    Run-->>LangGraph: Advance Next Node
+    LangGraph-->>Run: Workflow Complete
+    Run->>DB: UPDATE agent_runs SET status='COMPLETED'
+    Run->>Redis: Release Redsync Mutex
+    Run-->>UI: Stream Final Results
+```
 
 ---
 
-## 11. Security Architecture
+## 11. Security & Externalized Policy Guard (HLD)
 
-1. **Authentication & Tenant Isolation:** Every request to API Gateway requires a valid JWT containing `tenant_id` and `user_id`. Supabase rows enforce tenant boundaries via indexed foreign keys and Row Level Security (RLS).
-2. **Externalized Policy Guard (Least Privilege):** The LLM cannot grant itself permissions. The Capability & Policy Service verifies every tool call against pre-compiled policy rules:
-   * `max_budget_usd` enforcement.
-   * `read_only` mode enforcement.
-   * Mandatory human approval on mutation operations.
-3. **Secret Isolation:** PayPal API credentials, LLM keys, and database passwords exist solely within the server environment. Zero credentials are sent to the client or exposed in prompts.
-4. **Prompt Injection Mitigation:** System instructions and user-provided inputs are strictly separated in structured prompt templates. Tool outputs are treated as untrusted data and sanitized before re-injection into LLM context.
-5. **Immutable Audit Trails:** All tool executions, policy decisions, and human approvals write append-only records to Supabase `audit_events` with SHA-256 payload digests.
+DelTix guarantees that **the LLM cannot grant itself permissions or bypass security policies**. Every capability execution requested by an agent must pass through the deterministic Go Policy Engine:
 
----
-
-## 12. Deployment Architecture
-
-DelTix deploys locally and in testing environments using Docker and Docker Compose on an isolated bridge network (`deltix-net`). 
-
-Refer to [`diagrams/10-deployment-architecture.md`](./diagrams/10-deployment-architecture.md) for container ports, volume bindings, and service dependencies.
-
----
-
-## 13. Failure Handling & Recovery
-
-* **Database Checkpointing:** Every node execution persists state to Supabase.
-* **Safe Payment Retries:** Mutating payment operations are **never** blindly retried on network timeouts. The system invokes a read adapter (`paypal.orders.get` or `paypal.captures.get`) to verify whether the transaction completed before re-dispatching.
-* **Process Crash Recovery:** On container reboot, the Go Runtime Service queries Supabase for runs stuck in `RUNNING` status and restores the last committed checkpoint.
-
-The complete recovery workflow is documented in [`diagrams/11-failure-and-recovery-flow.md`](./diagrams/11-failure-and-recovery-flow.md).
+```mermaid
+flowchart LR
+    ToolRequest["Tool Call from\nLangGraph Node"] --> TenantFilter["1. Tenant Allowlist\nCheck (Go)"]
+    
+    TenantFilter -->|Unauthorized| BlockTenant["403 Forbidden:\nTenant Unauthorized"]
+    TenantFilter -->|Permitted| ReadOnlyFilter["2. Read-Only Invariant\nCheck (Go)"]
+    
+    ReadOnlyFilter -->|Mutation on Read-Only| BlockReadOnly["403 Forbidden:\nRead-Only Agent Violation"]
+    ReadOnlyFilter -->|Permitted| BudgetFilter["3. Spending Cap\nCheck (Go)"]
+    
+    BudgetFilter -->|Amount > Max Budget| BlockBudget["403 Forbidden:\nMax Budget Exceeded"]
+    BudgetFilter -->|Within Budget| SensitivityCheck{"4. Is Sensitive\nAction?"}
+    
+    SensitivityCheck -->|Yes & No Token| SuspendGate["202 Accepted:\nPause for Human Approval"]
+    SensitivityCheck -->|No OR Valid Token| IdempotencyCheck["5. Redis SETNX\nIdempotency Check"]
+    
+    IdempotencyCheck -->|Duplicate Key| BlockDuplicate["409 Conflict:\nDuplicate Mutation Suppressed"]
+    IdempotencyCheck -->|Lock Acquired| PayPalAdapter["6. Dispatch to PayPal\nSandbox REST API"]
+```
 
 ---
 
-## 14. Scalability Considerations
+## 12. Local Deployment Architecture (HLD)
 
-* **Stateless Go Control Plane:** Services 1, 2, and 5 are stateless Go microservices horizontally scalable behind round-robin load balancers.
-* **Redis Caching & Mutexes:** Sub-millisecond deduplication prevents double-submissions. Distributed locks prevent concurrent conflicting worker executions on the same run.
-* **Asynchronous LangGraph Execution:** Suspended approval runs do not hold worker threads or socket connections; state is serialized to Supabase JSONB.
-* **Database Indexing:** Composite indexes on `(tenant_id, run_id)` and `(run_id, step_index)` in Supabase ensure sub-millisecond checkpoint hydration.
+DelTix is packaged for reproducible local deployment using Docker Compose on an isolated bridge network (`deltix-net`).
+
+```mermaid
+flowchart LR
+    subgraph ClientHost["Host Environment"]
+        Browser["Dashboard Browser\n(http://localhost:3000)"]
+    end
+
+    subgraph DockerBridge["Docker Network: deltix-net (Bridge)"]
+        direction LR
+        
+        subgraph GatewayContainer["Edge Container"]
+            C_GW["deltix-gateway\n(Go 1.23)\nPort: 8080:8080\nEnv: JWT_SECRET,\nREDIS_URL"]
+        end
+
+        subgraph ControlContainers["Go Control Plane Containers"]
+            C_Comp["deltix-compiler\n(Go 1.23)\nPort: 8081:8081\nEnv: LLM_API_KEY"]
+            C_RunGo["deltix-runtime-control\n(Go 1.23)\nPort: 8082:8082\nEnv: REDIS_URL"]
+            C_Cap["deltix-capability\n(Go 1.23)\nPort: 8084:8084\nEnv: PAYPAL_CLIENT_ID"]
+        end
+
+        subgraph WorkerContainers["Python AI Plane Containers"]
+            C_Worker["deltix-langgraph-worker\n(Python 3.11)\nPort: 8085:8085\nEnv: LANGSMITH_API_KEY"]
+            C_Mem["deltix-memory\n(Python 3.11 + Mem0)\nPort: 8083:8083\nEnv: MEM0_API_KEY"]
+        end
+
+        subgraph StorageContainers["Database & Cache Containers"]
+            C_Redis[("deltix-redis\n(Redis 7-Alpine)\nPort: 6379:6379\nVol: redis_data")]
+            C_Supa[("deltix-supabase\n(PostgreSQL 16 + pgvector)\nPort: 5432:5432\nVol: pg_data")]
+        end
+    end
+
+    subgraph ExternalAPIs["External SaaS Cloud"]
+        Cloud_PP["PayPal Developer Sandbox"]
+        Cloud_LLM["OpenAI / Anthropic API"]
+        Cloud_LS["LangSmith Cloud Platform"]
+    end
+
+    Browser --> C_GW
+    C_GW --> C_Comp
+    C_GW --> C_RunGo
+    C_GW --> C_Cap
+    C_GW <--> C_Redis
+
+    C_Comp --> C_Cap
+    C_Comp --> C_Supa
+    C_Comp <--> Cloud_LLM
+
+    C_RunGo --> C_Worker
+    C_RunGo --> C_Cap
+    C_RunGo --> C_Supa
+    C_RunGo <--> C_Redis
+
+    C_Worker --> C_Mem
+    C_Worker --> C_Cap
+    C_Worker <--> Cloud_LS
+    C_Worker <--> Cloud_LLM
+
+    C_Cap --> C_Supa
+    C_Cap <--> C_Redis
+    C_Cap <--> Cloud_PP
+
+    C_Mem --> C_Supa
+    C_Mem <--> C_Redis
+```
 
 ---
 
-## 15. Architectural Decisions and Trade-Offs
+## 13. Failure Detection, Idempotency & Crash Recovery (HLD)
 
-| Decision | Alternative Considered | Selected Rationale & Trade-off |
-| :--- | :--- | :--- |
-| **Go for Core Services + Python for LangGraph** | Pure Python or Pure Go monorepo | **Selected:** Go provides typed concurrency, high-performance API routing, and robust policy enforcement. Python provides native LangGraph and Mem0 integration. **Trade-off:** Requires an internal HTTP bridge between Go runtime and Python worker. |
-| **Supabase (PostgreSQL 16 + pgvector) as System of Record** | Separate Vector DB (Pinecone/Qdrant) + separate Postgres | **Selected:** Consolidates relational state machine, ACID checkpoints, and semantic vector storage in one unified platform with Supabase Realtime support. |
-| **Redis for Distributed Locks & Deduplication** | DB-only row locks (`SELECT FOR UPDATE`) | **Selected:** Redis prevents database lock contention, handles high-throughput webhook deduplication, and provides sub-millisecond token-bucket rate limiting. |
-| **Dedicated Agent IR vs Direct Python Code Generation** | Generating raw LangGraph Python code | **Selected:** Generating executable Python code via LLM creates massive security vulnerabilities and untestable flows. Compiling into structured JSON `Agent IR` guarantees schema validation, policy verification, and static analysis. |
+```mermaid
+flowchart LR
+    StartNode["Execute Node Step"] --> PreCheckpoint["1. Write Pre-Run\nCheckpoint to Supabase"]
+    PreCheckpoint --> InvokeStep["2. Dispatch Node\nExecution"]
+    
+    InvokeStep --> Outcome{"3. Execution\nOutcome?"}
+    Outcome -->|Success| SaveStep["4. Commit Output State\nAdvance Graph Transition"]
+    SaveStep --> NextStep["Next Graph Node"]
+
+    Outcome -->|5xx / Timeout| RetryCheck{"5. Retries < Max?"}
+    RetryCheck -->|Yes| MutationCheck{"Mutation Action?"}
+    
+    MutationCheck -->|Yes - Payment| ReconcileProvider["Safety Check:\nQuery Provider First\n(Verify if capture executed)"]
+    ReconcileProvider -->|Already Processed| SaveStep
+    ReconcileProvider -->|Not Processed| BackoffWait["Exponential Backoff\n(1s, 2s, 4s...)"]
+    BackoffWait --> InvokeStep
+    MutationCheck -->|No - Safe Read| BackoffWait
+
+    RetryCheck -->|No - Exceeded| ErrorRoute["6. Trigger Node Fallback"]
+    Outcome -->|Fatal 4xx| ErrorRoute
+
+    ErrorRoute --> HasFallback{"Has Fallback Edge?"}
+    HasFallback -->|Yes| RouteCompensation["Route to Compensation\nNode Handler"]
+    RouteCompensation --> NextStep
+    HasFallback -->|No| TerminateFail["Halt Run (Status: FAILED)\nRelease Redis Mutex"]
+
+    subgraph WorkerReboot["Process Crash / Reboot Sweep"]
+        CrashPoint["Container Reboots Mid-Execution"] -.-> StartupSweep["Startup Background Sweep\n(Query runs with status='RUNNING')"]
+        StartupSweep --> HydrateLastCheckpoint["Hydrate Last Committed\nCheckpoint from Supabase"]
+        HydrateLastCheckpoint --> PreCheckpoint
+    end
+```
 
 ---
 
 # Part B — Low-Level Design (LLD)
 
-## 1. Agent Intermediate Representation (Agent IR)
+## 1. Agent Intermediate Representation (Agent IR) Structural Model
 
-The Agent IR is the declarative specification representing a compiled agent. It is versioned, validated against JSON Schema in Go, and structured into modular blocks.
+The `Agent IR v1.0` is the canonical, versioned specification representing an executable agent. It is completely decoupled from any single LLM or programming language.
 
-Refer to [`diagrams/05-agent-ir-structure.md`](./diagrams/05-agent-ir-structure.md) for structural entity relationships.
+### Detailed Class & Entity Contract Diagram (LLD)
 
-### Node Types
-1. `LLM_REASONING`: Instructs the LLM to analyze inputs, cross-reference data, or formulate a conclusion using structured prompts (Python LangGraph).
-2. `TOOL_EXECUTION`: Invokes a verified tool from the Capability Registry via the Go Capability & Policy Service.
-3. `DETERMINISTIC_PROCESS`: Performs exact mathematical calculations, diffing, schema mapping, or filtering in Go without LLM variance.
-4. `CONDITIONAL_ROUTER`: Evaluates boolean or enum conditions on current state to select the next branch edge.
-5. `HUMAN_APPROVAL`: Halts execution, generates an approval request, and transitions the run to `PAUSED_FOR_APPROVAL`.
-6. `MEMORY_RETRIEVAL`: Queries the Memory Service (Mem0 / Supabase pgvector) for historical patterns or merchant preferences.
-7. `MEMORY_UPDATE`: Appends verified conclusions or preference adjustments to Mem0.
+```mermaid
+classDiagram
+    direction LR
 
-### Illustrative Agent IR Example: Payment Reconciliation Agent
+    class AgentIR {
+        +string schema
+        +string ir_version
+        +string agent_id
+        +string tenant_id
+        +Metadata metadata
+        +IOContract inputs
+        +IOContract outputs
+        +List~CapabilityRef~ capabilities
+        +PolicyConfig policies
+        +MemoryConfig memory
+        +ExecutionLimits limits
+        +List~NodeDefinition~ nodes
+        +List~TransitionEdge~ transitions
+    }
+
+    class Metadata {
+        +string name
+        +string description
+        +string category
+        +string author
+        +string created_at
+    }
+
+    class CapabilityRef {
+        +string capability_id
+        +string version
+        +bool is_sensitive
+        +List~string~ allowed_actions
+    }
+
+    class PolicyConfig {
+        +float max_budget_usd
+        +bool read_only
+        +bool require_human_approval
+        +List~string~ approval_triggers
+        +List~string~ forbidden_actions
+    }
+
+    class MemoryConfig {
+        +bool enable_semantic_memory
+        +string memory_namespace
+        +int max_retrieval_k
+        +List~string~ state_keys_to_persist
+    }
+
+    class ExecutionLimits {
+        +int max_steps
+        +int timeout_seconds
+        +int max_loop_iterations
+        +int max_consecutive_errors
+    }
+
+    class NodeDefinition {
+        +string id
+        +string type
+        +string description
+        +map input_mapping
+        +map output_mapping
+        +RetryConfig retry_policy
+        +NodePayload payload
+    }
+
+    class RetryConfig {
+        +int max_retries
+        +int backoff_seconds
+    }
+
+    class TransitionEdge {
+        +string from_node
+        +string to_node
+        +string condition_expression
+        +bool is_default
+    }
+
+    AgentIR *-- Metadata
+    AgentIR *-- CapabilityRef
+    AgentIR *-- PolicyConfig
+    AgentIR *-- MemoryConfig
+    AgentIR *-- ExecutionLimits
+    AgentIR *-- NodeDefinition
+    NodeDefinition *-- RetryConfig
+    AgentIR *-- TransitionEdge
+```
+
+### Complete JSON Schema Reference Example: Payment Reconciliation Agent
 ```json
 {
   "$schema": "https://deltix.dev/schemas/agent_ir_v1.json",
@@ -430,126 +759,278 @@ Refer to [`diagrams/05-agent-ir-structure.md`](./diagrams/05-agent-ir-structure.
 
 ---
 
-## 2. Compiler Architecture
+## 2. Compiler Internal Pipeline (LLD)
 
-The compilation process converts probabilistic language into deterministic execution structures across 9 stages:
+The compilation pipeline converts unconstrained text into a cryptographically signed, executable spec across 9 deterministic and probabilistic stages:
 
-| Stage | Name | Nature | Responsibility | Failure Action |
-| :--- | :--- | :--- | :--- | :--- |
-| **1** | Requirement Extraction | Probabilistic (LLM) | Extracts agent goals, inputs, outputs, and constraints into typed JSON. | Re-prompt LLM with extraction schema. |
-| **2** | Clarification Loop | Deterministic / LLM | Identifies missing information (e.g., unspecified spending limit). | Generates user prompts and halts pipeline. |
-| **3** | Agent IR Synthesis | Probabilistic (LLM) | Emits complete draft `Agent IR` document. | Fallback to template synthesis. |
-| **4** | Schema Validation | **Deterministic (Go)** | Validates Agent IR against `agent_ir_v1.json` JSON Schema using `gojsonschema`. | Reject with detailed line/column syntax error. |
-| **5** | Graph Topology Validation | **Deterministic (Go)** | Builds graph adjacency list: detects unreachable nodes, invalid edge references, and loops exceeding `max_loop_iterations`. | Reject with invalid graph diagnostics. |
-| **6** | Capability Resolution | **Deterministic (Go)** | Resolves requested tools against Capability Registry. Validates parameter schemas. | Reject with `UNKNOWN_CAPABILITY_ERROR`. |
-| **7** | Policy Validation | **Deterministic (Go)** | Verifies agent policies against tenant limits (e.g. spend limits, write permissions). | Reject with `POLICY_VIOLATION_ERROR`. |
-| **8** | Synthetic Test Generation | Probabilistic (LLM) | Synthesizes positive, negative, and edge-case test payloads. | Fallback to standard archetype test fixtures. |
-| **9** | Sandbox Test Execution | **Deterministic (Go)** | Executes tests against mock capability adapters to verify transitions and limits. | Reject if any test assertion fails. |
+```mermaid
+flowchart LR
+    subgraph S1_Ingest["Stage 1: Ingestion"]
+        P1["Prompt Text"] --> LLM_Ext["LLM Intent\nExtraction"]
+    end
 
----
+    subgraph S2_Clarify["Stage 2: Clarification"]
+        LLM_Ext --> MissingCheck{"Missing\nRequired\nValues?"}
+        MissingCheck -->|Yes| PromptUser["Generate Targeted\nQuestions"]
+        PromptUser --> P1
+    end
 
-## 3. Execution Architecture
+    subgraph S3_Synthesize["Stage 3: Synthesis"]
+        MissingCheck -->|No| LLM_IR["LLM Agent IR\nDraft Generation"]
+    end
 
-The execution engine translates validated `Agent IR` into an active **Python LangGraph** workflow governed by the **Go Runtime Control Plane**.
+    subgraph S4_GoSchema["Stage 4: Schema Check"]
+        LLM_IR --> GoSchema["Go gojsonschema\nValidator"]
+        GoSchema -->|Invalid| RepairPrompt["LLM Repair\n(Max 2 retries)"]
+        RepairPrompt --> LLM_IR
+    end
 
-### Communication Bridge: Go Runtime to Python LangGraph Worker
-1. The **Go Runtime Service** owns tenant verification, run persistence in Supabase, and external tool execution.
-2. The Go service exposes an internal HTTP interface to the **Python LangGraph Worker**:
-   * `POST /v1/graph/execute-step`: Passes current graph state, invokes the next node.
-   * `POST /v1/graph/resume-step`: Passes approval token and resumes execution.
-3. When LangGraph needs to invoke a tool, it calls back to the Go service:
-   * `POST /v1/internal/tools/dispatch`: Go service validates policy, checks Redis idempotency, logs audit to Supabase, and calls PayPal.
+    subgraph S5_Topology["Stage 5: Topology"]
+        GoSchema -->|Valid| DFS["Tarjan DFS Analyzer\n- Cycle Detection\n- Reachability"]
+        DFS -->|Cycle without Exit| RepairPrompt
+    end
 
-### Human-in-the-Loop Interruption Mechanics
-* When an edge targets a `HUMAN_APPROVAL` node or a sensitive capability, LangGraph triggers an `interrupt()`.
-* LangGraph emits the checkpointed state to the Go Runtime Service.
-* Go Runtime writes the state to Supabase `agent_runs` table (`status = 'PAUSED_FOR_APPROVAL'`), inserts an entry into `approval_requests`, and releases the Redis lock.
-* Execution suspends. Zero background threads, sockets, or worker resources remain open.
-* When the human operator signs off via the UI, Go verifies the cryptographic token, marks the approval `APPROVED` in Supabase, re-acquires the Redis lock, and posts the resume request to LangGraph.
+    subgraph S6_CapResolve["Stage 6: Tool Binding"]
+        DFS -->|Valid Graph| Resolver["Capability Registry\nResolver (Go)"]
+        Resolver --> ToolCheck{"All Tools in\nRegistry?"}
+        ToolCheck -->|No| FailUnknown["Reject: Fictitious\nTool Detected"]
+    end
 
----
+    subgraph S7_Policy["Stage 7: Policy"]
+        ToolCheck -->|Yes| PolCheck["Policy Engine Check\n- Spend Limits\n- Read-only Mode"]
+        PolCheck --> PolStatus{"Violations?"}
+        PolStatus -->|Yes| FailPolicy["Reject: Policy\nViolation"]
+    end
 
-## 4. Memory Architecture
+    subgraph S8_TestGen["Stage 8: Tests"]
+        PolStatus -->|Passed| TestGen["Synthetic Test Generator\n(Positive & Negative)"]
+    end
 
-DelTix enforces strict operational and architectural boundaries across memory tiers. Refer to [`diagrams/06-memory-architecture.md`](./diagrams/06-memory-architecture.md).
-
-### 1. Short-Term Execution State (Python LangGraph In-Memory)
-* Ephemeral key-value context for the active run (node variables, intermediate calculation outputs).
-* Serialized to Supabase after every node transition.
-
-### 2. High-Speed Cache & Locking Layer (Redis 7)
-* Sub-millisecond deduplication of webhook events and idempotency keys (TTL: 24h).
-* Distributed mutexes via Redsync to prevent concurrent conflicting runs.
-* In-memory cache for top-k semantic memories to reduce vector search latency.
-
-### 3. Long-Term Semantic Memory (Python Mem0 + Supabase pgvector)
-* Stores non-authoritative merchant context:
-  * Merchant preferences (e.g., *"Prefers manual review for refunds on digital goods"*).
-  * Historical case summaries (e.g., *"Customer XYZ had 3 resolved disputes in October"*).
-* Scoped by `tenant_id` and `agent_id` with vector cosine similarity retrieval ($k=3$).
-* Invalidation: Memories older than 90 days or explicitly flagged as superseded are pruned.
-
-### 4. Structured Operational Data (Supabase PostgreSQL 16)
-* System-of-record for financial calculations, order numbers, capture IDs, and exact ledger amounts.
-* **Invariant:** Mem0 is **never** used as authoritative financial information. If an agent needs to know an order balance, it queries the live PayPal API or Supabase operational tables.
-
----
-
-## 5. Capability Architecture
-
-Every capability in DelTix is registered in an immutable catalog with strict Go contracts.
-
-Refer to [`diagrams/07-paypal-integration-flow.md`](./diagrams/07-paypal-integration-flow.md).
-
-### Capability Specification Structure
-```go
-type CapabilityContract struct {
-    ID                  string                 `json:"id"`                    // e.g. "paypal.refunds.create"
-    Version             string                 `json:"version"`               // e.g. "1.0.0"
-    Description         string                 `json:"description"`
-    ParametersSchema    map[string]interface{} `json:"parameters_schema"`     // Validated via JSONSchema
-    OutputSchema        map[string]interface{} `json:"output_schema"`
-    IsSensitive         bool                   `json:"is_sensitive"`          // Mandatory human approval
-    Idempotent          bool                   `json:"idempotent"`            // Safe to retry on network drop
-    TimeoutSeconds      int                    `json:"timeout_seconds"`
-    MaxRetries          int                    `json:"max_retries"`
-    RequiredPermissions []string               `json:"required_permissions"` // e.g. ["payments:write"]
-}
+    subgraph S9_Preflight["Stage 9: Pre-flight"]
+        TestGen --> MockHarness["Mock Sandbox\nTest Runner (Go)"]
+        MockHarness --> FinalGate{"All Tests\nPass?"}
+        FinalGate -->|No| FailTests["Reject: Test Case\nFailed"]
+        FinalGate -->|Yes| SignToken["Sign Readiness Token\nPersist to Supabase"]
+    end
 ```
 
-### Supported PayPal Capabilities (MVP)
-1. `paypal.orders.create`: Creates a PayPal Sandbox order (Sensitive, requires approval, Idempotent).
-2. `paypal.orders.capture`: Captures an authorized PayPal order (Sensitive, requires approval, Idempotent).
-3. `paypal.orders.get`: Retrieves authoritative order details (Read-only, Idempotent).
-4. `paypal.transactions.list`: Queries transaction history and settlement records (Read-only, Idempotent).
-5. `paypal.captures.get`: Reads specific payment capture details (Read-only, Idempotent).
-6. `paypal.refunds.create`: Issues a refund against an existing capture (Sensitive, requires approval, Idempotent).
+---
+
+## 3. Runtime Engine & State Machine (LLD)
+
+### State Machine Lifecycle Transition Graph (LLD)
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> INITIALIZING: Trigger Run Triggered
+    INITIALIZING --> RUNNING: Acquire Redsync Mutex & Load IR
+    
+    state RUNNING {
+        direction LR
+        SelectNode --> ExecuteNode: Node Handler
+        ExecuteNode --> SaveCheckpoint: Commit to Supabase
+        SaveCheckpoint --> EvaluateEdge: Check Edge Expression
+        EvaluateEdge --> SelectNode: Next Node Found
+    }
+    
+    RUNNING --> PAUSED_APPROVAL: Sensitive Tool Node Reached
+    
+    state PAUSED_APPROVAL {
+        direction LR
+        PersistState --> ReleaseRedsyncMutex
+        ReleaseRedsyncMutex --> AwaitHumanSignoff
+    }
+    
+    PAUSED_APPROVAL --> RESUMING: Decision Received via API
+    
+    state RESUMING {
+        direction LR
+        ValidateToken --> ReacquireRedsyncMutex
+        ReacquireRedsyncMutex --> HydrateCheckpoint
+    }
+    
+    RESUMING --> RUNNING: Decision == APPROVED
+    RESUMING --> REJECTED: Decision == REJECTED
+    
+    RUNNING --> FAILED: Retry Exhausted / Timeout
+    RUNNING --> COMPLETED: Reached Terminal End Node
+    
+    REJECTED --> [*]: Release Redis Lock
+    FAILED --> [*]: Release Redis Lock
+    COMPLETED --> [*]: Release Redis Lock
+```
+
+### Go Controller to Python LangGraph Bridge Protocol (LLD)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant GoRun as Go Runtime Controller (:8082)
+    participant Redis as Redis 7 (Mutex)
+    participant DB as Supabase (Checkpoints)
+    participant Worker as Python LangGraph Worker (:8085)
+    participant Policy as Capability Service (:8084)
+    participant LangSmith as LangSmith Telemetry
+
+    GoRun->>Redis: Redsync.Lock("lock:run_01j7")
+    GoRun->>Worker: POST /v1/graph/step (current_state, node_id)
+    
+    Worker->>LangSmith: StartSpan(run_id, node_id)
+    Worker->>Worker: Evaluate Node Logic (LLM / Calculation)
+    
+    alt Node requires Tool Execution
+        Worker->>GoRun: POST /internal/v1/tools/dispatch (tool_id, params)
+        GoRun->>Policy: POST /internal/v1/capabilities/execute
+        Policy-->>GoRun: Tool Result JSON
+        GoRun-->>Worker: HTTP 200 (Tool Output)
+    end
+    
+    Worker->>LangSmith: EndSpan(metrics, latency_ms)
+    Worker-->>GoRun: Step Complete (new_state, next_node_id)
+    
+    GoRun->>DB: INSERT INTO agent_run_checkpoints (state_payload)
+    GoRun->>GoRun: Check if next_node_id == SENSITIVE
+    alt Next Node is Sensitive Action
+        GoRun->>DB: UPDATE agent_runs SET status='PAUSED_FOR_APPROVAL'
+        GoRun->>Redis: Redsync.Unlock("lock:run_01j7")
+    else Graph Continues
+        GoRun->>Worker: POST /v1/graph/step (next_node_id)
+    end
+```
 
 ---
 
-## 6. Security and Policy Architecture
+## 4. Multi-Tier Memory Subsystem (LLD)
 
-Policy enforcement operates entirely outside of the LLM in the **Go Capability and Policy Service**.
+```mermaid
+flowchart LR
+    subgraph Tier1_Active["Tier 1: Ephemeral Active State (Python LangGraph)"]
+        WorkingCtx["In-Memory State Snapshot\n- Current Step Inputs\n- Prior Node Outputs\n- Execution Counters"]
+    end
 
-Refer to [`diagrams/08-approval-and-policy-flow.md`](./diagrams/08-approval-and-policy-flow.md).
+    subgraph Tier2_Fast["Tier 2: In-Memory Fast Cache (Redis 7)"]
+        MutexKey["lock:run_id\n(Redsync Mutex)"]
+        DedupKey["idempotency:run_id:step\n(TTL: 24h)"]
+        TopKKey["memcache:tenant:query\n(TTL: 1h)"]
+    end
 
-* **Idempotency in Redis & Supabase:** Every mutating call to PayPal Sandbox checks Redis (`SETNX idempotency:run_id:step_idx`) and includes `PayPal-Request-Id: hash(run_id + node_id + step_attempt)`.
-* **Zero Trust Prompt Processing:** Inputs from merchants are checked against sanitization filters; prompt injections cannot disable policy checks because the Go policy engine executes after the LLM emits the tool call.
+    subgraph Tier3_Semantic["Tier 3: Semantic Long-Term (Python Mem0 + Supabase)"]
+        Mem0Core["Mem0 SDK Engine\n- Embedding Extractor\n- Cosine Distance Search"]
+        PgVectorTable[("mem0_memories\n(Supabase pgvector)\n- Vector(1536)\n- Scoped by tenant_id")]
+    end
+
+    subgraph Tier4_ACID["Tier 4: Transactional Truth (Supabase PostgreSQL 16)"]
+        RunsTable[("agent_runs\n- Status & Output")]
+        CheckpointsTable[("agent_run_checkpoints\n- Immutable History")]
+        AuditTable[("audit_events\n- Append-Only SHA256")]
+    end
+
+    WorkingCtx <-->|"Acquire / Release Mutex"| MutexKey
+    WorkingCtx -->|"1. Commit Checkpoint"| CheckpointsTable
+    WorkingCtx -->|"2. Log Event"| AuditTable
+    CheckpointsTable -->|"3. Hydrate State"| WorkingCtx
+
+    WorkingCtx <-->|"4. Fast Memory Cache Hit"| TopKKey
+    TopKKey -.->|"Cache Miss: Query Mem0"| Mem0Core
+    WorkingCtx <-->|"5. Retrieve Patterns"| Mem0Core
+    Mem0Core <--> PgVectorTable
+
+    note["INVARIANT: Mem0 and Redis NEVER store authoritative financial balances.\nSupabase PostgreSQL + Live PayPal Sandbox API remain the sole authoritative truth."]
+```
 
 ---
 
-## 7. Diagram Cross-Reference Table
+## 5. Capability Registry & PayPal Adapters (LLD)
 
-| Concept | Diagram Link |
-| :--- | :--- |
-| Overall Ecosystem Context | [`diagrams/01-system-context.md`](./diagrams/01-system-context.md) |
-| Container & Service Architecture | [`diagrams/02-container-architecture.md`](./diagrams/02-container-architecture.md) |
-| Compilation & Validation Stages | [`diagrams/03-agent-compilation-pipeline.md`](./diagrams/03-agent-compilation-pipeline.md) |
-| Graph State Lifecycle | [`diagrams/04-agent-execution-lifecycle.md`](./diagrams/04-agent-execution-lifecycle.md) |
-| Agent IR Data Model | [`diagrams/05-agent-ir-structure.md`](./diagrams/05-agent-ir-structure.md) |
-| Multi-Tier Memory Partitioning | [`diagrams/06-memory-architecture.md`](./diagrams/06-memory-architecture.md) |
-| Controlled PayPal Sandbox Flow | [`diagrams/07-paypal-integration-flow.md`](./diagrams/07-paypal-integration-flow.md) |
-| Human Sign-off & Policy Engine | [`diagrams/08-approval-and-policy-flow.md`](./diagrams/08-approval-and-policy-flow.md) |
-| Inter-Service Communication Topology | [`diagrams/09-service-interaction.md`](./diagrams/09-service-interaction.md) |
-| Docker Local Deployment Stack | [`diagrams/10-deployment-architecture.md`](./diagrams/10-deployment-architecture.md) |
-| Checkpoints & Crash Recovery | [`diagrams/11-failure-and-recovery-flow.md`](./diagrams/11-failure-and-recovery-flow.md) |
+Every tool in DelTix is mediated by typed Go contracts and executed exclusively through official PayPal Sandbox REST endpoints:
+
+```mermaid
+flowchart LR
+    subgraph RegistryCatalog["Capability Registry Catalog (Go)"]
+        direction LR
+        Tool1["paypal.orders.create\n- Mutation (Sensitive)\n- Idempotent: true"]
+        Tool2["paypal.orders.capture\n- Mutation (Sensitive)\n- Idempotent: true"]
+        Tool3["paypal.orders.get\n- Read-Only\n- Idempotent: true"]
+        Tool4["paypal.transactions.list\n- Read-Only\n- Idempotent: true"]
+        Tool5["paypal.captures.get\n- Read-Only\n- Idempotent: true"]
+        Tool6["paypal.refunds.create\n- Mutation (Sensitive)\n- Idempotent: true"]
+    end
+
+    subgraph DispatchEngine["Capability & Policy Service (Go 1.23)"]
+        SchemaVerify["1. JSON Schema\nParam Verification"]
+        PolicyVerify["2. Spend Limit &\nRead-Only Check"]
+        ApprovalVerify["3. Human Approval\nToken Verification"]
+        RedisDedup["4. Redis SETNX\nIdempotency Guard"]
+        OAuthManager["5. PayPal OAuth2\nToken Manager (Auto-Refresh)"]
+        AuditLogger["6. Append-Only\nSupabase Audit Logger"]
+    end
+
+    subgraph PayPalSandbox["PayPal Developer Sandbox (api-m.sandbox.paypal.com)"]
+        EndpointOrders["/v2/checkout/orders"]
+        EndpointCaptures["/v2/payments/captures"]
+        EndpointRefunds["/v2/payments/captures/{id}/refund"]
+        EndpointTxns["/v1/reporting/transactions"]
+    end
+
+    RegistryCatalog --> SchemaVerify
+    SchemaVerify --> PolicyVerify
+    PolicyVerify --> ApprovalVerify
+    ApprovalVerify --> RedisDedup
+    RedisDedup --> OAuthManager
+    OAuthManager --> AuditLogger
+
+    OAuthManager -->|"POST /v2/checkout/orders"| EndpointOrders
+    OAuthManager -->|"POST /v2/payments/captures/{id}/refund"| EndpointRefunds
+    OAuthManager -->|"GET /v1/reporting/transactions"| EndpointTxns
+    OAuthManager -->|"GET /v2/payments/captures/{id}"| EndpointCaptures
+```
+
+---
+
+## 6. Complete Human-in-the-Loop Interruption Sequence (LLD)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Operator as Human Merchant / Operator
+    participant UI as Dashboard Approval Modal
+    participant GW as API Gateway (Go)
+    participant Run as Runtime Controller (Go)
+    participant Redis as Redis 7 (Mutex)
+    participant PolicySvc as Capability & Policy Svc (Go)
+    participant DB as Supabase (PostgreSQL)
+    participant PayPal as PayPal Sandbox REST API
+
+    Note over Run,PolicySvc: LangGraph reaches a Sensitive Action Node (e.g. Capture or Refund)
+    Run->>PolicySvc: POST /internal/v1/capabilities/execute ("paypal.refunds.create", $45.00)
+    PolicySvc->>PolicySvc: Evaluate Policy: Sensitive == true -> Requires Human Approval
+    
+    PolicySvc->>DB: INSERT INTO approval_requests (approval_id, run_id, token_hash, status='PENDING')
+    PolicySvc-->>Run: 202 Accepted (Status: APPROVAL_REQUIRED, approval_id)
+    
+    Run->>DB: UPDATE agent_runs SET status='PAUSED_FOR_APPROVAL'
+    Run->>Redis: Redsync.Unlock("lock:run_id")
+    Run-->>GW: Event: Execution Paused (Approval ID)
+    GW-->>UI: Display Approval Request Modal ("Approve $45.00 Refund for Order #123?")
+    
+    Note over Operator,UI: Operator inspects discrepancy evidence & decision rationale
+    Operator->>UI: Clicks "Approve" (Signs with JWT / Session)
+    UI->>GW: POST /v1/approvals/{approval_id}/decision (decision="APPROVED")
+    
+    GW->>PolicySvc: ProcessApproval(approval_id, decision="APPROVED", approver_id)
+    PolicySvc->>DB: UPDATE approval_requests SET status='APPROVED', approved_by=approver_id
+    PolicySvc->>Run: POST /internal/v1/runs/{run_id}/resume (approval_token)
+    
+    Run->>Redis: Redsync.Lock("lock:run_id")
+    Run->>DB: SELECT checkpoint FROM agent_run_checkpoints WHERE run_id = run_id
+    Run->>Run: Restore State Snapshot
+    Run->>PolicySvc: POST /internal/v1/capabilities/execute (with approval_token)
+    
+    PolicySvc->>Redis: SETNX idempotency:run_id:step_idx
+    PolicySvc->>PayPal: POST /v2/payments/captures/{id}/refund (PayPal-Request-Id: hash)
+    PayPal-->>PolicySvc: 201 Created (Refund ID)
+    PolicySvc->>DB: INSERT INTO audit_events (status='SUCCESS', payload_hash)
+    PolicySvc-->>Run: Step Success Output
+    Run->>Run: Advance Next Graph Node
+```
