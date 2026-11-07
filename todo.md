@@ -36,13 +36,13 @@
 ---
 
 ## 3. Workstream 1 — API Gateway (`backend/api-gateway/`)
-- [ ] Gateway Config (`config/config.go`)
-- [ ] Session Auth & Tenant Injection Middleware (`middleware/auth_middleware.go`)
-- [ ] Redis Token-Bucket Rate Limiting Middleware (`middleware/ratelimit_middleware.go`)
-- [ ] Google OAuth Login, Callback, Logout & Session Handlers (`handlers/gateway_handler.go`)
-- [ ] Reverse Proxy Service & SSE Live Execution Stream Hub (`services/proxy_service.go`)
-- [ ] Gateway Routes & Server Entrypoint (`routes/routes.go`, `cmd/main.go`)
-- [ ] Gateway Unit & Integration Tests (`tests/gateway_test.go`)
+- [x] Gateway Config (`config/config.go`)
+- [x] Session Auth & Tenant Injection Middleware (`middleware/auth_middleware.go`)
+- [x] Redis Token-Bucket Rate Limiting Middleware (`middleware/ratelimit_middleware.go`)
+- [x] Google OAuth Login, Callback, Logout & Session Handlers (`handlers/gateway_handler.go`) — *Auth integrated; downstream APIs marked with `TODO`*
+- [x] Reverse Proxy Service & SSE Live Execution Stream Hub (`services/proxy_service.go`) — *Proxy helper ready; downstream targets marked with `TODO`*
+- [x] Gateway Routes & Server Entrypoint (`routes/routes.go`, `cmd/main.go`) — *Auth routes live; downstream routes marked with `TODO`*
+- [x] Gateway Unit & Integration Tests (`tests/gateway_test.go`)
 
 ---
 
