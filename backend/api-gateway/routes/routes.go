@@ -19,14 +19,14 @@ func NewRouter(
 	mux.HandleFunc("GET /v1/auth/google/login", gatewayHandler.HandleGoogleLogin)
 	mux.HandleFunc("GET /v1/auth/google/callback", gatewayHandler.HandleGoogleCallback)
 
-	// Helper to wrap authenticated + rate-limited endpoints
+	
 	protect := func(h http.HandlerFunc) http.Handler {
 		return authMiddleware.RequireSession(
 			rateLimitMiddleware.EnforceTenantRateLimit(h),
 		)
 	}
 
-	// 2. Protected Session Endpoints (Live — Google OAuth + Upstash Redis Session)
+	
 	mux.Handle("GET /v1/auth/me", protect(gatewayHandler.HandleGetCurrentSession))
 	mux.Handle("POST /v1/auth/logout", protect(gatewayHandler.HandleLogout))
 

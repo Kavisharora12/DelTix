@@ -14,6 +14,7 @@
 ---
 
 ## 2. Shared Infrastructure (`backend/shared/`)
+- [x] **Go Module Initialized** (`backend/shared/go.mod` — `github.com/deltix/shared`)
 - [x] **Configuration Loader** (`backend/shared/config/config.go`)
   - Supabase PostgreSQL Pooler config, Upstash Redis config, Google OAuth config
 - [x] **Supabase PostgreSQL Pooler & Migrator** (`backend/shared/database/postgres.go`)
@@ -36,13 +37,20 @@
 ---
 
 ## 3. Workstream 1 — API Gateway (`backend/api-gateway/`)
-- [x] Gateway Config (`config/config.go`)
-- [x] Session Auth & Tenant Injection Middleware (`middleware/auth_middleware.go`)
-- [x] Redis Token-Bucket Rate Limiting Middleware (`middleware/ratelimit_middleware.go`)
-- [x] Google OAuth Login, Callback, Logout & Session Handlers (`handlers/gateway_handler.go`) — *Auth integrated; downstream APIs marked with `TODO`*
-- [x] Reverse Proxy Service & SSE Live Execution Stream Hub (`services/proxy_service.go`) — *Proxy helper ready; downstream targets marked with `TODO`*
-- [x] Gateway Routes & Server Entrypoint (`routes/routes.go`, `cmd/main.go`) — *Auth routes live; downstream routes marked with `TODO`*
-- [x] Gateway Unit & Integration Tests (`tests/gateway_test.go`)
+- [x] **Go Module Initialized** (`backend/api-gateway/go.mod` — `github.com/deltix/api-gateway` with `replace github.com/deltix/shared => ../shared`)
+- [x] **Gateway Config** (`config/config.go`)
+- [x] **Session Auth & Tenant Injection Middleware** (`middleware/auth_middleware.go`)
+- [x] **Redis Token-Bucket Rate Limiting Middleware** (`middleware/ratelimit_middleware.go`)
+- [x] **Google OAuth Login, Callback, Logout & Session Handlers** (`handlers/gateway_handler.go`)
+  - Live: `GET /healthz`, `GET /v1/auth/google/login`, `GET /v1/auth/google/callback`, `GET /v1/auth/me`, `POST /v1/auth/logout`
+  - Persists authenticated `tenants` & `users` to Supabase PostgreSQL and sessions to Upstash Redis
+- [x] **Reverse Proxy Service & SSE Live Execution Stream Hub** (`services/proxy_service.go`)
+- [x] **Gateway Routes & Server Entrypoint** (`routes/routes.go`, `cmd/main.go`)
+- [x] **Gateway Unit & Integration Tests** (`tests/gateway_test.go`)
+- [ ] **Pending Downstream Proxy Wiring (`TODO` in `routes/routes.go` & `services/proxy_service.go`):**
+  - [ ] Wire `/v1/agents/compile` and `/v1/agents/specs*` once Workstream 2 (`agent-compiler-service`) is ready
+  - [ ] Wire `/v1/runs*` and `/v1/runs/{run_id}/stream` (SSE) once Workstream 3 (`agent-runtime-service`) is ready
+  - [ ] Wire `/v1/capabilities` and `/v1/approvals/{approval_id}/decide` once Workstream 5 (`capability-policy-service`) is ready
 
 ---
 
