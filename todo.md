@@ -26,7 +26,8 @@
 - [x] **Tenant & Session Context** (`backend/shared/auth/tenant.go`)
   - Request-scoped `UserSession` and `TenantID` context propagation
 - [x] **Single-Database SQL Schema Migration** (`backend/shared/migrations/001_initial_schema.sql`)
-  - All 10 core tables (`tenants`, `users`, `capability_registry`, `agent_specs`, `agent_compilation_logs`, `agent_runs`, `agent_run_checkpoints`, `action_intents`, `approval_requests`, `audit_events`, `mem0_memories`)
+  - Pure ACID relational & financial tables (`tenants`, `users`, `capability_registry`, `agent_specs`, `agent_compilation_logs`, `agent_runs`, `agent_run_checkpoints`, `action_intents`, `approval_requests`, `audit_events`)
+  - Upstash Redis used strictly for tiny primitives (sessions, CSRF state, rate-limits, locks, idempotency); long-term semantic memory lives in Mem0 (`memory-service`)
   - Monotonic `seq_id BIGSERIAL` and composite B-Tree indexes for fast cursor/offset queries (zero fake/seed data)
 - [x] **Shared Domain Models** (`backend/shared/models/models.go`)
   - Go structs for `Tenant`, `User`, `AgentSpec`, `AgentRun`, `RunCheckpoint`, `ActionIntent`, `ApprovalRequest`, `AuditEvent`, `CapabilityContract`
@@ -48,21 +49,20 @@
 - [x] **Gateway Routes & Server Entrypoint** (`routes/routes.go`, `cmd/main.go`)
 - [x] **Gateway Unit & Integration Tests** (`tests/gateway_test.go`)
 - [ ] **Pending Downstream Proxy Wiring (`TODO` in `routes/routes.go` & `services/proxy_service.go`):**
-  - [ ] Wire `/v1/agents/compile` and `/v1/agents/specs*` once Workstream 2 (`agent-compiler-service`) is ready
+  - [x] Wire `/v1/agents/compile` and `/v1/agents/specs*` to Workstream 2 (`agent-compiler-service`)
   - [ ] Wire `/v1/runs*` and `/v1/runs/{run_id}/stream` (SSE) once Workstream 3 (`agent-runtime-service`) is ready
   - [ ] Wire `/v1/capabilities` and `/v1/approvals/{approval_id}/decide` once Workstream 5 (`capability-policy-service`) is ready
 
 ---
 
 ## 4. Workstream 2 — Agent Compiler Service (`backend/agent-compiler-service/`)
-- [ ] Compiler Config (`config/config.go`)
-- [ ] Compiler Request/Response & Clarification Models (`models/compiler_models.go`)
-- [ ] Deterministic Schema & Tarjan DFS Graph Topology Validator (`services/validator_service.go`)
-- [ ] LLM Requirement Extraction, Clarification & Agent IR Synthesis (`services/compiler_service.go`)
-- [ ] Synthetic Test Generator & Pre-Flight Mock Harness (`services/validator_service.go`)
-- [ ] Supabase Spec & Compilation Log Repository (`services/compiler_service.go`)
-- [ ] Compiler HTTP Handlers, Routes & Entrypoint (`handlers/compiler_handler.go`, `routes/routes.go`, `cmd/main.go`)
-- [ ] Compiler Unit & Table-Driven Validation Tests (`tests/compiler_test.go`)
+- [x] **Go Module** (`backend/agent-compiler-service/go.mod` — `github.com/deltix/agent-compiler-service`)
+- [x] **Compiler Config** (`config/config.go`)
+- [x] **Compiler Request/Response & Clarification Models** (`models/compiler_models.go`)
+- [x] **Deterministic Schema, Tarjan/DFS Graph Topology Validator & Pre-Flight Mock Test Harness** (`services/validator_service.go`)
+- [x] **LLM Requirement Extraction, Clarification, Agent IR Synthesis, HMAC Signer & Supabase Repository** (`services/compiler_service.go`)
+- [x] **Compiler HTTP Handlers, Routes & Entrypoint** (`handlers/compiler_handler.go`, `routes/routes.go`, `cmd/main.go`)
+- [x] **Compiler Unit & Table-Driven Validation Tests** (`tests/compiler_test.go`)
 
 ---
 
@@ -102,6 +102,7 @@
 ---
 
 ## 8. Frontend Dashboard (`frontend/`)
-- [ ] Natural Language Prompt & Clarification UI
-- [ ] Compiled `Agent IR` & Validation Test Scorecard Viewer
-- [ ] Live Execution Timeline (SSE) & Human Approval Modal
+- [x] **Frontend Content & Component Specifications for Current Built Scope** (`frontend/README.md`, `frontend/01-landing-and-auth.md`, `frontend/02-agent-compiler-studio.md`, `frontend/03-agent-specs-library.md`)
+- [ ] Natural Language Prompt & Clarification UI Implementation
+- [ ] Compiled `Agent IR` & Validation Test Scorecard Viewer Implementation
+- [ ] Live Execution Timeline (SSE) & Human Approval Modal Implementation *(Pending Workstreams 3 & 5)*

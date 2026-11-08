@@ -43,22 +43,22 @@ func (s *PostgresUserStore) UpsertTenantAndUser(ctx context.Context, session aut
 	}()
 
 	const upsertTenantSQL = `
-		INSERT INTO tenants (id, name, status)
+		INSERT INTO tenants (tenant_id, name, status)
 		VALUES ($1, $2, 'ACTIVE')
-		ON CONFLICT (id) DO NOTHING
+		ON CONFLICT (tenant_id) DO NOTHING
 	`
 	if _, err := tx.Exec(ctx, upsertTenantSQL, session.TenantID, "Workspace "+session.TenantID); err != nil {
 		return fmt.Errorf("upsert tenant: %w", err)
 	}
 
 	const upsertUserSQL = `
-		INSERT INTO users (id, tenant_id, email, name, picture_url, last_login_at)
+		INSERT INTO users (user_id, tenant_id, email, name, picture_url, last_login)
 		VALUES ($1, $2, $3, $4, $5, NOW())
-		ON CONFLICT (id) DO UPDATE
+		ON CONFLICT (user_id) DO UPDATE
 		SET email = EXCLUDED.email,
 		    name = EXCLUDED.name,
 		    picture_url = EXCLUDED.picture_url,
-		    last_login_at = NOW()
+		    last_login = NOW()
 	`
 	if _, err := tx.Exec(
 		ctx,

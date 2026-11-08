@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
@@ -9,7 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
+	"net/http"
 	"strings"
 	"time"
 
@@ -34,6 +35,134 @@ type CompilationLogEntry struct {
 	Diagnostics          interface{}
 }
 
+// LLMSynthesisOutput represents the structured JSON response from the LLM compiler model.
+type LLMSynthesisOutput struct {
+	NeedsClarification     bool                                   `json:"needs_clarification"`
+	ClarificationQuestions []compilermodels.ClarificationQuestion `json:"clarification_questions,omitempty"`
+	AgentIR                *sharedmodels.AgentIR                  `json:"agent_ir,omitempty"`
+}
+
+// IRSynthesizer abstracts the structured LLM call that analyzes a prompt against registered capabilities.
+type IRSynthesizer interface {
+	Synthesize(
+		ctx context.Context,
+		tenantID string,
+		userID string,
+		agentID string,
+		req compilermodels.CompileRequest,
+		activeCapabilities []CapabilityMetadata,
+	) (LLMSynthesisOutput, error)
+}
+
+// OpenAIIRSynthesizer calls the configured OpenAI-compatible /chat/completions endpoint with JSON mode.
+type OpenAIIRSynthesizer struct {
+	baseURL    string
+	apiKey     string
+	model      string
+	httpClient *http.Client
+}
+
+func NewOpenAIIRSynthesizer(baseURL string, apiKey string, model string, httpClient *http.Client) *OpenAIIRSynthesizer {
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	return &OpenAIIRSynthesizer{
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		apiKey:     apiKey,
+		model:      model,
+		httpClient: httpClient,
+	}
+}
+
+func (o *OpenAIIRSynthesizer) Synthesize(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+	agentID string,
+	req compilermodels.CompileRequest,
+	activeCapabilities []CapabilityMetadata,
+) (LLMSynthesisOutput, error) {
+	capsJSON, _ := json.Marshal(activeCapabilities)
+	clarifJSON, _ := json.Marshal(req.Clarifications)
+
+	systemPrompt := fmt.Sprintf(`You are the DelTix Deterministic Financial AI Agent Compiler.
+Your job is to compile a user's natural language request into a JSON response matching LLMSynthesisOutput:
+{
+  "needs_clarification": boolean,
+  "clarification_questions": [{"field": string, "question": string, "why_required": string, "suggestions": [string]}],
+  "agent_ir": AgentIR (v1.0.0)
+}
+Rules:
+1. Only use capabilities from the active Supabase capability_registry: %s
+2. If the prompt requests a money-moving mutation (is_mutation=true) and "max_budget_usd" is missing from clarifications, set "needs_clarification": true and ask for "max_budget_usd".
+3. If the prompt requests a sensitive capability (is_sensitive=true) and "require_human_approval" is missing from clarifications, set "needs_clarification": true and ask for "require_human_approval".
+4. When compiling agent_ir:
+   - Set ir_version="1.0.0", agent_id=%q, tenant_id=%q, metadata.author=%q.
+   - Include a terminal sink node (0 outgoing transitions) reachable from the entry node.
+   - Only include MEMORY_RETRIEVAL / MEMORY_UPDATE nodes when long-term semantic memory (Mem0) is relevant.`,
+		string(capsJSON), agentID, tenantID, userID,
+	)
+
+	userContent := fmt.Sprintf(
+		"Agent Name: %s\nCategory: %s\nPrompt: %s\nClarifications: %s",
+		req.Name, req.Category, req.NaturalLanguagePrompt, string(clarifJSON),
+	)
+
+	chatReqBody, err := json.Marshal(map[string]interface{}{
+		"model":       o.model,
+		"temperature": 0.0,
+		"response_format": map[string]string{
+			"type": "json_object",
+		},
+		"messages": []map[string]string{
+			{"role": "system", "content": systemPrompt},
+			{"role": "user", "content": userContent},
+		},
+	})
+	if err != nil {
+		return LLMSynthesisOutput{}, fmt.Errorf("marshal llm request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/chat/completions", bytes.NewReader(chatReqBody))
+	if err != nil {
+		return LLMSynthesisOutput{}, fmt.Errorf("create llm http request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
+
+	resp, err := o.httpClient.Do(httpReq)
+	if err != nil {
+		return LLMSynthesisOutput{}, fmt.Errorf("call llm endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return LLMSynthesisOutput{}, fmt.Errorf("llm endpoint returned status %d", resp.StatusCode)
+	}
+
+	var completionResp struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&completionResp); err != nil {
+		return LLMSynthesisOutput{}, fmt.Errorf("decode llm completion response: %w", err)
+	}
+	if len(completionResp.Choices) == 0 {
+		return LLMSynthesisOutput{}, errors.New("llm returned zero choices")
+	}
+
+	var out LLMSynthesisOutput
+	if err := json.Unmarshal([]byte(completionResp.Choices[0].Message.Content), &out); err != nil {
+		return LLMSynthesisOutput{}, fmt.Errorf("unmarshal llm structured json output: %w", err)
+	}
+
+	return out, nil
+}
+
+// SpecRepository persists compiled AgentSpec records and compilation logs in Supabase PostgreSQL.
 type SpecRepository interface {
 	SaveCompiledSpec(ctx context.Context, spec sharedmodels.AgentSpec) error
 	RecordCompilationLog(ctx context.Context, entry CompilationLogEntry) error
@@ -217,23 +346,26 @@ func scanAgentSpec(row pgx.Row) (sharedmodels.AgentSpec, error) {
 }
 
 type CompilerService struct {
-	repo         SpecRepository
-	validator    *ValidatorService
-	hmacSecret   []byte
-	nowUTC       func() time.Time
-	idGenerator  func(prefix string) string
+	repo        SpecRepository
+	catalog     CapabilityCatalogResolver
+	synthesizer IRSynthesizer
+	validator   *ValidatorService
+	hmacSecret  []byte
+	nowUTC      func() time.Time
+	idGenerator func(prefix string) string
 }
 
 func NewCompilerService(
 	repo SpecRepository,
+	catalog CapabilityCatalogResolver,
+	synthesizer IRSynthesizer,
 	validator *ValidatorService,
 	hmacSecret string,
 ) *CompilerService {
-	if validator == nil {
-		validator = NewValidatorService(nil)
-	}
 	return &CompilerService{
 		repo:        repo,
+		catalog:     catalog,
+		synthesizer: synthesizer,
 		validator:   validator,
 		hmacSecret:  []byte(hmacSecret),
 		nowUTC:      func() time.Time { return time.Now().UTC() },
@@ -241,11 +373,11 @@ func NewCompilerService(
 	}
 }
 
-// Compile executes the 7-guardrail compilation pipeline:
-// 1. Ambiguity & Financial Constraint Clarification Check
-// 2. Canonical AgentIR v1.0 Synthesis
-// 3. Static Schema, Topology, Capability & Policy Validation + 3 Pre-Flight Mock Tests
-// 4. HMAC-SHA256 Readiness Token Signing & Supabase Persistence
+// Compile executes the full compilation pipeline backed by Supabase PostgreSQL:
+// 1. Queries active PayPal capabilities from Supabase capability_registry.
+// 2. Invokes the structured LLM IRSynthesizer (returning CLARIFICATION_REQUIRED if constraints are missing).
+// 3. Validates the synthesized AgentIR against all deterministic guardrails and graph traversal checks.
+// 4. Signs the HMAC-SHA256 readiness_token and persists the final AgentSpec & log to Supabase PostgreSQL.
 func (s *CompilerService) Compile(
 	ctx context.Context,
 	tenantID string,
@@ -257,9 +389,23 @@ func (s *CompilerService) Compile(
 		return compilermodels.CompileResponse{}, err
 	}
 
-	// Stage 1: Guardrail 1 — Detect missing financial constraints on money-moving prompts
-	questions := detectMissingGuardrailClarifications(req.NaturalLanguagePrompt, req.Clarifications)
-	if len(questions) > 0 {
+	// TODO(workstream-4): Query Mem0 (memory-service) for long-term tenant compilation preferences.
+
+	activeCaps, err := s.catalog.ListActiveCapabilities(ctx)
+	if err != nil {
+		return compilermodels.CompileResponse{}, fmt.Errorf("load active capabilities from registry: %w", err)
+	}
+
+	agentID := s.idGenerator("agt")
+	specID := s.idGenerator("spc")
+
+	llmOut, err := s.synthesizer.Synthesize(ctx, tenantID, userID, agentID, req, activeCaps)
+	if err != nil {
+		return compilermodels.CompileResponse{}, fmt.Errorf("synthesize agent ir: %w", err)
+	}
+
+	// Guardrail 1: If clarification is required, log to Supabase agent_compilation_logs and return questions
+	if llmOut.NeedsClarification || len(llmOut.ClarificationQuestions) > 0 {
 		_ = s.recordLog(ctx, CompilationLogEntry{
 			LogID:                s.idGenerator("log"),
 			TenantID:             tenantID,
@@ -267,21 +413,27 @@ func (s *CompilerService) Compile(
 			ClarificationPayload: req.Clarifications,
 			CompilerStage:        "STAGE_1_AMBIGUITY_DETECTION",
 			Status:               "NEEDS_CLARIFICATION",
-			Diagnostics:          questions,
+			Diagnostics:          llmOut.ClarificationQuestions,
 		})
 		return compilermodels.CompileResponse{
 			Status:                 compilermodels.OutcomeClarificationRequired,
-			ClarificationQuestions: questions,
+			ClarificationQuestions: llmOut.ClarificationQuestions,
 			TraceID:                traceID,
 		}, nil
 	}
 
-	// Stage 2: Synthesize Canonical AgentIR v1.0
-	agentID := s.idGenerator("agt")
-	specID := s.idGenerator("spc")
-	ir := s.synthesizeAgentIR(tenantID, userID, agentID, req)
+	if llmOut.AgentIR == nil {
+		return compilermodels.CompileResponse{}, errors.New("synthesizer returned neither clarification questions nor agent_ir")
+	}
 
-	// Stage 3: Execute Static Guardrails & Pre-Flight Synthetic Dry-Run Tests
+	ir := *llmOut.AgentIR
+	ir.AgentID = agentID
+	ir.TenantID = tenantID
+	if ir.Metadata.CreatedAt.IsZero() {
+		ir.Metadata.CreatedAt = s.nowUTC()
+	}
+
+	// Guardrails 2-7: Deterministic Schema, Topology, Capability Registry, Policy & Graph Walk Verification
 	report, tests := s.validator.ValidateAndTestIR(ctx, ir)
 	if len(report.Errors) > 0 || report.TestsPassed < report.TestsRun {
 		_ = s.recordLog(ctx, CompilationLogEntry{
@@ -302,7 +454,6 @@ func (s *CompilerService) Compile(
 		}, nil
 	}
 
-	// Stage 4: Sign Cryptographic Readiness Token & Persist Compiled Spec
 	readinessToken, err := s.SignReadinessToken(specID, ir)
 	if err != nil {
 		return compilermodels.CompileResponse{}, fmt.Errorf("sign readiness token: %w", err)
@@ -326,7 +477,7 @@ func (s *CompilerService) Compile(
 
 	if s.repo != nil {
 		if err := s.repo.SaveCompiledSpec(ctx, spec); err != nil {
-			return compilermodels.CompileResponse{}, fmt.Errorf("save compiled spec: %w", err)
+			return compilermodels.CompileResponse{}, fmt.Errorf("save compiled spec in supabase: %w", err)
 		}
 		_ = s.recordLog(ctx, CompilationLogEntry{
 			LogID:                s.idGenerator("log"),
@@ -353,6 +504,13 @@ func (s *CompilerService) Compile(
 	}, nil
 }
 
+func (s *CompilerService) recordLog(ctx context.Context, entry CompilationLogEntry) error {
+	if s.repo == nil {
+		return nil
+	}
+	return s.repo.RecordCompilationLog(ctx, entry)
+}
+
 func (s *CompilerService) GetSpec(ctx context.Context, tenantID string, specID string) (sharedmodels.AgentSpec, error) {
 	return s.repo.GetSpecByID(ctx, tenantID, specID)
 }
@@ -377,213 +535,6 @@ func (s *CompilerService) SignReadinessToken(specID string, ir sharedmodels.Agen
 	payload := fmt.Sprintf("%s:%s:READY", specID, hex.EncodeToString(irDigest[:]))
 	_, _ = mac.Write([]byte(payload))
 	return "rtok_" + hex.EncodeToString(mac.Sum(nil)), nil
-}
-
-func (s *CompilerService) recordLog(ctx context.Context, entry CompilationLogEntry) error {
-	if s.repo == nil {
-		return nil
-	}
-	return s.repo.RecordCompilationLog(ctx, entry)
-}
-
-func detectMissingGuardrailClarifications(
-	prompt string,
-	clarifications map[string]string,
-) []compilermodels.ClarificationQuestion {
-	lower := strings.ToLower(prompt)
-	isMutation := strings.Contains(lower, "refund") ||
-		strings.Contains(lower, "capture") ||
-		strings.Contains(lower, "create order") ||
-		strings.Contains(lower, "charge") ||
-		strings.Contains(lower, "pay")
-
-	if !isMutation {
-		return nil
-	}
-
-	var questions []compilermodels.ClarificationQuestion
-
-	budgetVal := strings.TrimSpace(clarifications["max_budget_usd"])
-	if budgetVal == "" {
-		questions = append(questions, compilermodels.ClarificationQuestion{
-			Field:       "max_budget_usd",
-			Question:    "What is the maximum USD budget cap allowed for this money-moving agent per run?",
-			WhyRequired: "DelTix requires an explicit USD ceiling (e.g., 50.00 or 250.00) on all mutating PayPal agents.",
-			Suggestions: []string{"50.00", "100.00", "500.00"},
-		})
-	}
-
-	approvalVal := strings.TrimSpace(clarifications["require_human_approval"])
-	isSensitive := strings.Contains(lower, "refund") || strings.Contains(lower, "capture")
-	if isSensitive && approvalVal == "" {
-		questions = append(questions, compilermodels.ClarificationQuestion{
-			Field:       "require_human_approval",
-			Question:    "Should this agent pause for human operator approval before executing PayPal refunds or captures?",
-			WhyRequired: "Sensitive money-moving operations (refunds and captures) require an explicit human-in-the-loop policy.",
-			Suggestions: []string{"true"},
-		})
-	}
-
-	return questions
-}
-
-func (s *CompilerService) synthesizeAgentIR(
-	tenantID string,
-	userID string,
-	agentID string,
-	req compilermodels.CompileRequest,
-) sharedmodels.AgentIR {
-	lower := strings.ToLower(req.NaturalLanguagePrompt)
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		name = "DelTix Financial Agent"
-	}
-	category := strings.TrimSpace(req.Category)
-	if category == "" {
-		category = "PAYPAL_OPERATIONS"
-	}
-
-	// Determine target PayPal capability based on prompt intent
-	capabilityID := "paypal.transactions.list"
-	isMutation := false
-	isSensitive := false
-
-	switch {
-	case strings.Contains(lower, "refund"):
-		capabilityID = "paypal.captures.refund"
-		isMutation = true
-		isSensitive = true
-	case strings.Contains(lower, "capture"):
-		capabilityID = "paypal.orders.capture"
-		isMutation = true
-		isSensitive = true
-	case strings.Contains(lower, "create order") || strings.Contains(lower, "charge") || strings.Contains(lower, "pay"):
-		capabilityID = "paypal.orders.create"
-		isMutation = true
-		isSensitive = false
-	case strings.Contains(lower, "get order") || strings.Contains(lower, "order status"):
-		capabilityID = "paypal.orders.get"
-	}
-
-	budgetUSD := 0.0
-	if isMutation {
-		if parsed, err := strconv.ParseFloat(strings.TrimSpace(req.Clarifications["max_budget_usd"]), 64); err == nil {
-			budgetUSD = parsed
-		}
-	}
-
-	requireApproval := isSensitive || strings.EqualFold(strings.TrimSpace(req.Clarifications["require_human_approval"]), "true")
-
-	nodes := []sharedmodels.NodeDefinition{
-		{
-			ID:          "node_memory_retrieve",
-			Type:        sharedmodels.NodeTypeMemoryRetrieval,
-			Description: "Retrieve relevant tenant and customer history from semantic memory.",
-		},
-		{
-			ID:          "node_llm_reason",
-			Type:        sharedmodels.NodeTypeLLMReasoning,
-			Description: "Analyze input parameters and plan PayPal operation.",
-			Payload: sharedmodels.NodePayload{
-				PromptTemplate: req.NaturalLanguagePrompt,
-				Temperature:    0.0,
-			},
-		},
-	}
-
-	transitions := []sharedmodels.TransitionEdge{
-		{FromNode: "node_memory_retrieve", ToNode: "node_llm_reason", IsDefault: true},
-	}
-
-	prevNode := "node_llm_reason"
-	if requireApproval {
-		nodes = append(nodes, sharedmodels.NodeDefinition{
-			ID:          "node_human_approval",
-			Type:        sharedmodels.NodeTypeHumanApproval,
-			Description: "Pause execution and request human operator approval before mutating PayPal state.",
-		})
-		transitions = append(transitions, sharedmodels.TransitionEdge{
-			FromNode:  prevNode,
-			ToNode:    "node_human_approval",
-			IsDefault: true,
-		})
-		prevNode = "node_human_approval"
-	}
-
-	nodes = append(nodes,
-		sharedmodels.NodeDefinition{
-			ID:          "node_paypal_tool",
-			Type:        sharedmodels.NodeTypeToolExecution,
-			Description: "Execute verified PayPal Sandbox capability.",
-			Payload: sharedmodels.NodePayload{
-				CapabilityID: capabilityID,
-				Operation:    "EXECUTE",
-			},
-			RetryPolicy: sharedmodels.RetryConfig{MaxRetries: 2, BackoffSeconds: 2},
-		},
-		sharedmodels.NodeDefinition{
-			ID:          "node_memory_update",
-			Type:        sharedmodels.NodeTypeMemoryUpdate,
-			Description: "Record sanitized interaction summary in semantic memory.",
-		},
-		sharedmodels.NodeDefinition{
-			ID:          "node_terminal",
-			Type:        sharedmodels.NodeTypeDeterministicProcess,
-			Description: "Terminal sink node.",
-		},
-	)
-
-	transitions = append(transitions,
-		sharedmodels.TransitionEdge{FromNode: prevNode, ToNode: "node_paypal_tool", IsDefault: true},
-		sharedmodels.TransitionEdge{FromNode: "node_paypal_tool", ToNode: "node_memory_update", IsDefault: true},
-		sharedmodels.TransitionEdge{FromNode: "node_memory_update", ToNode: "node_terminal", IsDefault: true},
-	)
-
-	return sharedmodels.AgentIR{
-		IRVersion: sharedmodels.SupportedIRVersion,
-		AgentID:   agentID,
-		TenantID:  tenantID,
-		Metadata: sharedmodels.IRMetadata{
-			Name:        name,
-			Description: req.NaturalLanguagePrompt,
-			Category:    category,
-			Author:      userID,
-			CreatedAt:   s.nowUTC(),
-		},
-		Inputs: map[string]sharedmodels.ParameterSchema{
-			"resource_id": {Type: "string", Description: "Target PayPal Order or Capture ID", Required: true},
-		},
-		Outputs: map[string]sharedmodels.ParameterSchema{
-			"status": {Type: "string", Description: "Execution outcome status", Required: true},
-		},
-		Capabilities: []sharedmodels.CapabilityRef{
-			{
-				CapabilityID:   capabilityID,
-				Version:        "1.0.0",
-				IsSensitive:    isSensitive,
-				AllowedActions: []string{"EXECUTE"},
-			},
-		},
-		Policies: sharedmodels.PolicyConfig{
-			ReadOnly:             !isMutation,
-			MaxBudgetUSD:         budgetUSD,
-			RequireHumanApproval: requireApproval,
-		},
-		Memory: sharedmodels.MemoryConfig{
-			EnableSemanticMemory: true,
-			MemoryNamespace:      fmt.Sprintf("ns_%s_%s", tenantID, agentID),
-			MaxRetrievalK:        5,
-			StateKeysToPersist:   []string{"summary"},
-		},
-		ExecutionLimits: sharedmodels.ExecutionLimits{
-			MaxSteps:             15,
-			TimeoutSeconds:       60,
-			MaxLoopIterations:    1,
-			MaxConsecutiveErrors: 2,
-		},
-		Nodes:       nodes,
-		Transitions: transitions,
-	}
 }
 
 func generatePrefixedID(prefix string) string {

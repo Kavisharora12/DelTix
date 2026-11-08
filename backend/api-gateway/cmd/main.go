@@ -14,6 +14,7 @@ import (
 	"github.com/deltix/api-gateway/handlers"
 	"github.com/deltix/api-gateway/middleware"
 	"github.com/deltix/api-gateway/routes"
+	"github.com/deltix/api-gateway/services"
 	"github.com/deltix/shared/auth"
 	"github.com/deltix/shared/database"
 )
@@ -51,6 +52,16 @@ func run(logger *slog.Logger) error {
 		_ = redisClient.Close()
 	}()
 
+	proxyService, err := services.NewProxyService(
+		cfg.CompilerServiceURL,
+		cfg.RuntimeServiceURL,
+		cfg.MemoryServiceURL,
+		cfg.CapabilityPolicyServiceURL,
+	)
+	if err != nil {
+		return err
+	}
+
 	sessionManager := auth.NewRedisSessionManager(redisClient, cfg.GoogleAuth, nil)
 	userStore := handlers.NewPostgresUserStore(pgPool)
 
@@ -58,7 +69,12 @@ func run(logger *slog.Logger) error {
 	rateLimitMiddleware := middleware.NewRateLimitMiddleware(redisClient, cfg.RateLimitPerMinute)
 	gatewayHandler := handlers.NewGatewayHandler(sessionManager, userStore, cfg.CookieSecure)
 
-	router := routes.NewRouter(gatewayHandler, authMiddleware, rateLimitMiddleware)
+	router := routes.NewRouter(
+		gatewayHandler,
+		authMiddleware,
+		rateLimitMiddleware,
+		proxyService.CompilerProxy(),
+	)
 
 	server := &http.Server{
 		Addr:         ":" + cfg.HTTPPort,

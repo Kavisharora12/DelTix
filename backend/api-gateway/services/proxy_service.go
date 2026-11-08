@@ -53,6 +53,11 @@ func NewProxyService(
 	}, nil
 }
 
+// CompilerProxy returns the reverse proxy handler for the Agent Compiler Service (port 8081).
+func (p *ProxyService) CompilerProxy() http.Handler {
+	return p.NewJSONReverseProxy(p.compilerURL, "agent-compiler-service")
+}
+
 // NewJSONReverseProxy builds a standard HTTP reverse proxy that forwards verified tenant/user headers.
 // TODO: Wire this to Compiler (8081), Runtime (8082), and Capability/Policy (8084) routes when ready.
 func (p *ProxyService) NewJSONReverseProxy(target *url.URL, serviceName string) http.Handler {

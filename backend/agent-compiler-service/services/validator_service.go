@@ -2,10 +2,13 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	compilermodels "github.com/deltix/agent-compiler-service/models"
 	sharedmodels "github.com/deltix/shared/models"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 const (
@@ -16,62 +19,84 @@ const (
 )
 
 type CapabilityMetadata struct {
-	CapabilityID string
-	Version      string
-	IsMutation   bool
-	IsSensitive  bool
+	CapabilityID string `json:"capability_id"`
+	Version      string `json:"version"`
+	Description  string `json:"description"`
+	IsMutation   bool   `json:"is_mutation"`
+	IsSensitive  bool   `json:"is_sensitive"`
 }
 
-// CapabilityCatalogResolver resolves PayPal capability contracts during compilation.
-// TODO(workstream-5): Implement HTTP client backed by Service 5 (/internal/v1/capabilities/resolve) when Workstream 5 is ready.
+// CapabilityCatalogResolver resolves registered PayPal capability contracts from Supabase capability_registry.
 type CapabilityCatalogResolver interface {
 	ResolveCapability(ctx context.Context, capabilityID string) (CapabilityMetadata, bool, error)
+	ListActiveCapabilities(ctx context.Context) ([]CapabilityMetadata, error)
 }
 
-type LocalPayPalCapabilityCatalog struct {
-	contracts map[string]CapabilityMetadata
+// PostgresCapabilityCatalog queries the real Supabase PostgreSQL capability_registry table.
+type PostgresCapabilityCatalog struct {
+	pool *pgxpool.Pool
 }
 
-func NewLocalPayPalCapabilityCatalog() *LocalPayPalCapabilityCatalog {
-	return &LocalPayPalCapabilityCatalog{
-		contracts: map[string]CapabilityMetadata{
-			"paypal.orders.create": {
-				CapabilityID: "paypal.orders.create",
-				Version:      "1.0.0",
-				IsMutation:   true,
-				IsSensitive:  false,
-			},
-			"paypal.orders.get": {
-				CapabilityID: "paypal.orders.get",
-				Version:      "1.0.0",
-				IsMutation:   false,
-				IsSensitive:  false,
-			},
-			"paypal.orders.capture": {
-				CapabilityID: "paypal.orders.capture",
-				Version:      "1.0.0",
-				IsMutation:   true,
-				IsSensitive:  true,
-			},
-			"paypal.captures.refund": {
-				CapabilityID: "paypal.captures.refund",
-				Version:      "1.0.0",
-				IsMutation:   true,
-				IsSensitive:  true,
-			},
-			"paypal.transactions.list": {
-				CapabilityID: "paypal.transactions.list",
-				Version:      "1.0.0",
-				IsMutation:   false,
-				IsSensitive:  false,
-			},
-		},
+func NewPostgresCapabilityCatalog(pool *pgxpool.Pool) *PostgresCapabilityCatalog {
+	return &PostgresCapabilityCatalog{pool: pool}
+}
+
+func (c *PostgresCapabilityCatalog) ResolveCapability(
+	ctx context.Context,
+	capabilityID string,
+) (CapabilityMetadata, bool, error) {
+	const querySQL = `
+		SELECT capability_id, version, description, is_mutation, is_sensitive
+		FROM capability_registry
+		WHERE capability_id = $1 AND status = 'ACTIVE'
+		ORDER BY seq_id DESC
+		LIMIT 1
+	`
+	var meta CapabilityMetadata
+	err := c.pool.QueryRow(ctx, querySQL, capabilityID).Scan(
+		&meta.CapabilityID,
+		&meta.Version,
+		&meta.Description,
+		&meta.IsMutation,
+		&meta.IsSensitive,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return CapabilityMetadata{}, false, nil
 	}
+	if err != nil {
+		return CapabilityMetadata{}, false, fmt.Errorf("query capability_registry for %s: %w", capabilityID, err)
+	}
+	return meta, true, nil
 }
 
-func (c *LocalPayPalCapabilityCatalog) ResolveCapability(_ context.Context, capabilityID string) (CapabilityMetadata, bool, error) {
-	meta, ok := c.contracts[capabilityID]
-	return meta, ok, nil
+func (c *PostgresCapabilityCatalog) ListActiveCapabilities(ctx context.Context) ([]CapabilityMetadata, error) {
+	const listSQL = `
+		SELECT capability_id, version, description, is_mutation, is_sensitive
+		FROM capability_registry
+		WHERE status = 'ACTIVE'
+		ORDER BY seq_id ASC
+	`
+	rows, err := c.pool.Query(ctx, listSQL)
+	if err != nil {
+		return nil, fmt.Errorf("list active capabilities from capability_registry: %w", err)
+	}
+	defer rows.Close()
+
+	var capabilities []CapabilityMetadata
+	for rows.Next() {
+		var meta CapabilityMetadata
+		if err := rows.Scan(
+			&meta.CapabilityID,
+			&meta.Version,
+			&meta.Description,
+			&meta.IsMutation,
+			&meta.IsSensitive,
+		); err != nil {
+			return nil, fmt.Errorf("scan capability_registry row: %w", err)
+		}
+		capabilities = append(capabilities, meta)
+	}
+	return capabilities, rows.Err()
 }
 
 type ValidatorService struct {
@@ -79,14 +104,11 @@ type ValidatorService struct {
 }
 
 func NewValidatorService(catalog CapabilityCatalogResolver) *ValidatorService {
-	if catalog == nil {
-		catalog = NewLocalPayPalCapabilityCatalog()
-	}
 	return &ValidatorService{catalog: catalog}
 }
 
 // ValidateAndTestIR executes all static guardrails (schema, graph topology, capability & policy rules)
-// followed by the 3 pre-flight synthetic dry-run tests.
+// followed by deterministic graph traversal verification.
 func (v *ValidatorService) ValidateAndTestIR(
 	ctx context.Context,
 	ir sharedmodels.AgentIR,
@@ -128,8 +150,8 @@ func (v *ValidatorService) ValidateAndTestIR(
 		return report, nil
 	}
 
-	// Stage 4: Pre-Flight Synthetic Dry-Run Test Harness
-	tests := runSyntheticPreFlightTests(ir)
+	// Stage 4: Deterministic Graph Walk Pre-Flight Verification
+	tests := verifyGraphExecutionPaths(ir)
 	report.TestsRun = len(tests)
 	for _, t := range tests {
 		if t.Passed {
@@ -278,6 +300,10 @@ func (v *ValidatorService) validateCapabilitiesAndPolicies(
 	ctx context.Context,
 	ir sharedmodels.AgentIR,
 ) ([]string, []string) {
+	if v.catalog == nil {
+		return nil, []string{"CAPABILITY_CATALOG_UNCONFIGURED: capability resolver is nil"}
+	}
+
 	var resolved []string
 	var errs []string
 	seenCaps := make(map[string]bool)
@@ -301,7 +327,7 @@ func (v *ValidatorService) validateCapabilitiesAndPolicies(
 			continue
 		}
 		if !exists {
-			errs = append(errs, fmt.Sprintf("UNKNOWN_CAPABILITY: %q is not a registered PayPal capability", capID))
+			errs = append(errs, fmt.Sprintf("UNKNOWN_CAPABILITY: %q is not active in capability_registry", capID))
 			continue
 		}
 
@@ -344,26 +370,56 @@ func (v *ValidatorService) validateCapabilitiesAndPolicies(
 	return resolved, errs
 }
 
-func runSyntheticPreFlightTests(ir sharedmodels.AgentIR) []compilermodels.SyntheticTestResult {
-	happyPass := len(ir.Nodes) > 0 && ir.ExecutionLimits.MaxSteps <= MaxAllowedSteps
-	budgetPass := ir.Policies.ReadOnly || (ir.Policies.MaxBudgetUSD > 0 && ir.Policies.MaxBudgetUSD <= MaxSandboxBudgetLimitUSD)
-	malformedPass := ir.ExecutionLimits.MaxConsecutiveErrors > 0
+// verifyGraphExecutionPaths walks the compiled AgentIR transitions from the entry node
+// to verify terminal reachability within MaxSteps, budget policy enforcement, and error bounds.
+func verifyGraphExecutionPaths(ir sharedmodels.AgentIR) []compilermodels.SyntheticTestResult {
+	adj := make(map[string][]sharedmodels.TransitionEdge, len(ir.Nodes))
+	for _, edge := range ir.Transitions {
+		adj[edge.FromNode] = append(adj[edge.FromNode], edge)
+	}
+
+	steps := 0
+	curr := ir.Nodes[0].ID
+	reachedTerminal := false
+
+	for steps < ir.ExecutionLimits.MaxSteps {
+		steps++
+		edges := adj[curr]
+		if len(edges) == 0 {
+			reachedTerminal = true
+			break
+		}
+		nextNode := edges[0].ToNode
+		for _, e := range edges {
+			if e.IsDefault {
+				nextNode = e.ToNode
+				break
+			}
+		}
+		curr = nextNode
+	}
+
+	budgetEnforced := ir.Policies.ReadOnly || (ir.Policies.MaxBudgetUSD > 0 && ir.Policies.MaxBudgetUSD <= MaxSandboxBudgetLimitUSD)
+	errorBoundsEnforced := ir.ExecutionLimits.MaxConsecutiveErrors > 0 && ir.ExecutionLimits.MaxConsecutiveErrors <= 10
 
 	return []compilermodels.SyntheticTestResult{
 		{
-			ScenarioName: "happy_path_dry_run",
-			Passed:       happyPass,
-			Detail:       "Simulated nominal PayPal Sandbox response; graph reached terminal sink within step limit.",
+			ScenarioName: "default_path_terminal_traversal",
+			Passed:       reachedTerminal,
+			StepsVisited: steps,
+			Detail:       fmt.Sprintf("Traversed default transition path from %q to terminal %q in %d steps (max_steps=%d).", ir.Nodes[0].ID, curr, steps, ir.ExecutionLimits.MaxSteps),
 		},
 		{
-			ScenarioName: "policy_budget_boundary_dry_run",
-			Passed:       budgetPass,
-			Detail:       "Simulated $999,999.00 payload; deterministic budget policy guard intercepted exceeding amount.",
+			ScenarioName: "policy_budget_envelope_check",
+			Passed:       budgetEnforced,
+			StepsVisited: 1,
+			Detail:       fmt.Sprintf("Verified policy envelope: read_only=%v, max_budget_usd=%.2f, require_human_approval=%v.", ir.Policies.ReadOnly, ir.Policies.MaxBudgetUSD, ir.Policies.RequireHumanApproval),
 		},
 		{
-			ScenarioName: "malformed_input_dry_run",
-			Passed:       malformedPass,
-			Detail:       "Simulated missing parameter input; error boundary halted within max_consecutive_errors.",
+			ScenarioName: "error_circuit_bound_check",
+			Passed:       errorBoundsEnforced,
+			StepsVisited: 1,
+			Detail:       fmt.Sprintf("Verified consecutive error circuit bound: max_consecutive_errors=%d, timeout_seconds=%d.", ir.ExecutionLimits.MaxConsecutiveErrors, ir.ExecutionLimits.TimeoutSeconds),
 		},
 	}
 }
