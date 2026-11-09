@@ -74,6 +74,9 @@ func run(logger *slog.Logger) error {
 		authMiddleware,
 		rateLimitMiddleware,
 		proxyService.CompilerProxy(),
+		proxyService.RuntimeProxy(),
+		proxyService.NewSSEReverseProxy(),
+		proxyService.CapabilityPolicyProxy(),
 	)
 
 	server := &http.Server{

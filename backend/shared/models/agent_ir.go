@@ -86,6 +86,7 @@ type ParameterSchema struct {
 type CapabilityRef struct {
 	CapabilityID   string   `json:"capability_id"`
 	Version        string   `json:"version"`
+	IsMutation     bool     `json:"is_mutation"`
 	IsSensitive    bool     `json:"is_sensitive"`
 	AllowedActions []string `json:"allowed_actions"`
 }

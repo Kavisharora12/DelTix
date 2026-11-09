@@ -163,6 +163,8 @@ type CapabilityContract struct {
 	Version             string          `json:"version"`
 	SeqID               int64           `json:"seq_id,omitempty"`
 	Description         string          `json:"description"`
+	HTTPMethod          string          `json:"http_method"`
+	EndpointPath        string          `json:"endpoint_path"`
 	ParametersSchema    json.RawMessage `json:"parameters_schema"`
 	OutputSchema        json.RawMessage `json:"output_schema"`
 	IsSensitive         bool            `json:"is_sensitive"`

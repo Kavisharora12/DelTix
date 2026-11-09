@@ -11,12 +11,25 @@ func NewRouter(
 	gatewayHandler *handlers.GatewayHandler,
 	authMiddleware *middleware.AuthMiddleware,
 	rateLimitMiddleware *middleware.RateLimitMiddleware,
-	compilerProxy ...http.Handler,
+	downstreamProxies ...http.Handler,
 ) http.Handler {
 	mux := http.NewServeMux()
 	var activeCompilerProxy http.Handler
-	if len(compilerProxy) > 0 {
-		activeCompilerProxy = compilerProxy[0]
+	var activeRuntimeProxy http.Handler
+	var activeRuntimeSSEProxy http.Handler
+	var activeCapabilityProxy http.Handler
+
+	if len(downstreamProxies) > 0 {
+		activeCompilerProxy = downstreamProxies[0]
+	}
+	if len(downstreamProxies) > 1 {
+		activeRuntimeProxy = downstreamProxies[1]
+	}
+	if len(downstreamProxies) > 2 {
+		activeRuntimeSSEProxy = downstreamProxies[2]
+	}
+	if len(downstreamProxies) > 3 {
+		activeCapabilityProxy = downstreamProxies[3]
 	}
 
 	// 1. Public Health & Google OAuth Endpoints (Live)
@@ -51,20 +64,33 @@ func NewRouter(
 		mux.Handle("GET /v1/agents/specs/{spec_id}", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-compiler-service")))
 	}
 
-	// -------------------------------------------------------------------------
-	// 4. Downstream Microservice Routes (TODO — Not Integrated Yet)
-	// Currently returns 501 Not Implemented after verifying Auth & Rate Limits.
-	// -------------------------------------------------------------------------
+	// 4. Workstream 3: Agent Runtime Service Routes (Live Proxy to Port 8082 when configured)
+	if activeRuntimeProxy != nil {
+		mux.Handle("POST /v1/runs", protectHandler(activeRuntimeProxy))
+		mux.Handle("GET /v1/runs", protectHandler(activeRuntimeProxy))
+		mux.Handle("GET /v1/runs/{run_id}", protectHandler(activeRuntimeProxy))
+	} else {
+		mux.Handle("POST /v1/runs", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-runtime-service")))
+		mux.Handle("GET /v1/runs", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-runtime-service")))
+		mux.Handle("GET /v1/runs/{run_id}", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-runtime-service")))
+	}
 
-	// TODO(workstream-3): Connect to Agent Runtime Service (port 8082)
-	mux.Handle("POST /v1/runs", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-runtime-service")))
-	mux.Handle("GET /v1/runs", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-runtime-service")))
-	mux.Handle("GET /v1/runs/{run_id}", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-runtime-service")))
-	mux.Handle("GET /v1/runs/{run_id}/stream", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-runtime-service-sse")))
+	if activeRuntimeSSEProxy != nil {
+		mux.Handle("GET /v1/runs/{run_id}/stream", protectHandler(activeRuntimeSSEProxy))
+	} else if activeRuntimeProxy != nil {
+		mux.Handle("GET /v1/runs/{run_id}/stream", protectHandler(activeRuntimeProxy))
+	} else {
+		mux.Handle("GET /v1/runs/{run_id}/stream", protect(gatewayHandler.HandleDownstreamNotImplemented("agent-runtime-service-sse")))
+	}
 
-	// TODO(workstream-5): Connect to Capability & Policy Service (port 8084)
-	mux.Handle("GET /v1/capabilities", protect(gatewayHandler.HandleDownstreamNotImplemented("capability-policy-service")))
-	mux.Handle("POST /v1/approvals/{approval_id}/decide", protect(gatewayHandler.HandleDownstreamNotImplemented("capability-policy-service")))
+	// 5. Workstream 5: Capability & Policy Service Routes (Live Proxy to Port 8084 when configured)
+	if activeCapabilityProxy != nil {
+		mux.Handle("GET /v1/capabilities", protectHandler(activeCapabilityProxy))
+		mux.Handle("POST /v1/approvals/{approval_id}/decide", protectHandler(activeCapabilityProxy))
+	} else {
+		mux.Handle("GET /v1/capabilities", protect(gatewayHandler.HandleDownstreamNotImplemented("capability-policy-service")))
+		mux.Handle("POST /v1/approvals/{approval_id}/decide", protect(gatewayHandler.HandleDownstreamNotImplemented("capability-policy-service")))
+	}
 
 	return mux
 }

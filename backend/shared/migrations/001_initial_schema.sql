@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS capability_registry (
     version              TEXT NOT NULL DEFAULT '1.0.0',
     seq_id               BIGSERIAL UNIQUE NOT NULL,
     description          TEXT NOT NULL,
+    http_method          TEXT NOT NULL DEFAULT 'POST' CHECK (http_method IN ('GET', 'POST', 'PUT', 'PATCH', 'DELETE')),
+    endpoint_path        TEXT NOT NULL DEFAULT '',
     parameters_schema    JSONB NOT NULL,
     output_schema        JSONB NOT NULL,
     is_sensitive         BOOLEAN NOT NULL DEFAULT FALSE,
@@ -84,6 +86,8 @@ CREATE TABLE IF NOT EXISTS capability_registry (
 ALTER TABLE capability_registry
     ADD COLUMN IF NOT EXISTS seq_id BIGSERIAL,
     ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS http_method TEXT NOT NULL DEFAULT 'POST',
+    ADD COLUMN IF NOT EXISTS endpoint_path TEXT NOT NULL DEFAULT '',
     ADD COLUMN IF NOT EXISTS parameters_schema JSONB NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN IF NOT EXISTS output_schema JSONB NOT NULL DEFAULT '{}'::jsonb,
     ADD COLUMN IF NOT EXISTS is_sensitive BOOLEAN NOT NULL DEFAULT FALSE,

@@ -443,18 +443,22 @@ class DynamicLangGraphEngine:
 
                 elif node_type == "TOOL_EXECUTION":
                     cap_id = payload.get("capability_id", "")
-                    operation = payload.get("operation", "EXECUTE")
+                    operation = str(payload.get("operation", "EXECUTE")).upper()
                     cap_ref = capabilities_map.get(cap_id, {})
                     is_sensitive = bool(cap_ref.get("is_sensitive", False))
+                    allowed_actions = [
+                        str(a).upper() for a in (cap_ref.get("allowed_actions") or [])
+                    ]
+                    is_mutation = bool(cap_ref.get("is_mutation", False)) or (
+                        is_sensitive
+                        or (allowed_actions and "READ" not in allowed_actions)
+                        or operation in ("CREATE", "CAPTURE", "REFUND", "MUTATE", "DELETE", "SEND")
+                    )
                     read_only_policy = bool(policies.get("read_only", False))
                     max_budget_usd = float(policies.get("max_budget_usd", 0.0))
 
-                    # Deterministic Runtime Guardrail 1: Read-Only Policy Enforcement
-                    if read_only_policy and cap_id in (
-                        "paypal.orders.create",
-                        "paypal.orders.capture",
-                        "paypal.captures.refund",
-                    ):
+                    # Deterministic Runtime Guardrail 1: Read-Only Policy Enforcement (Dynamic metadata check)
+                    if read_only_policy and is_mutation:
                         raise PermissionError(
                             f"READ_ONLY_POLICY_VIOLATION: cannot execute mutating capability {cap_id}"
                         )
