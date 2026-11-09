@@ -13,16 +13,22 @@ from services.executor_service import (
     HTTPMemoryClient,
     HTTPToolDispatcher,
     LangChainGeminiCascade,
+    PayPalAgentToolkitDispatcher,
+    ToolDispatcherProtocol,
 )
 
 
 class ExecuteGraphRequest(BaseModel):
-    """Request payload sent by the Go Runtime Control Plane to start or step a run."""
+    """Request payload sent by the Go Runtime Control Plane to start or resume a run."""
 
     run_id: str = Field(..., min_length=1)
     tenant_id: str = Field(..., min_length=1)
     agent_ir: dict[str, Any]
     inputs: dict[str, Any] = Field(default_factory=dict)
+    prior_state: dict[str, Any] | None = None
+    resume_from_node_id: str | None = None
+    approval_status: str = ""
+    approval_token: str = ""
 
 
 class ResumeGraphRequest(BaseModel):
@@ -45,6 +51,7 @@ class WorkerExecutionResponse(BaseModel):
     run_status: str
     step_index: int
     current_node_id: str
+    pause_requested: bool = False
     paused_at_node_id: str = ""
     pause_summary: str = ""
     cumulative_spend: float
@@ -53,6 +60,7 @@ class WorkerExecutionResponse(BaseModel):
     error_message: str = ""
     checkpoints: list[dict[str, Any]]
     state_snapshot: dict[str, Any]
+    final_state: dict[str, Any]
 
 
 def create_worker_app(
@@ -69,10 +77,21 @@ def create_worker_app(
             rpm_per_model=resolved_cfg.gemini_rpm_per_model,
             window_seconds=resolved_cfg.gemini_sliding_window_seconds,
         )
-        tool_dispatcher = HTTPToolDispatcher(
+        http_dispatcher = HTTPToolDispatcher(
             base_url=resolved_cfg.capability_policy_service_url,
             timeout_seconds=resolved_cfg.http_timeout_seconds,
         )
+        tool_dispatcher: ToolDispatcherProtocol
+        if resolved_cfg.paypal_client_id and resolved_cfg.paypal_client_secret:
+            tool_dispatcher = PayPalAgentToolkitDispatcher(
+                client_id=resolved_cfg.paypal_client_id,
+                client_secret=resolved_cfg.paypal_client_secret,
+                sandbox=resolved_cfg.paypal_sandbox,
+                fallback_http_dispatcher=http_dispatcher,
+            )
+        else:
+            tool_dispatcher = http_dispatcher
+
         memory_client = HTTPMemoryClient(
             base_url=resolved_cfg.memory_service_url,
         )
@@ -93,6 +112,10 @@ def create_worker_app(
             "status": "ok",
             "service": "agent-runtime-worker",
             "gemini_models": resolved_cfg.gemini_models,
+            "paypal_toolkit_configured": bool(
+                resolved_cfg.paypal_client_id and resolved_cfg.paypal_client_secret
+            ),
+            "paypal_sandbox": resolved_cfg.paypal_sandbox,
             "langsmith_tracing": resolved_cfg.langchain_tracing_v2,
         }
 
@@ -104,6 +127,10 @@ def create_worker_app(
                 run_id=req.run_id,
                 tenant_id=req.tenant_id,
                 inputs=req.inputs,
+                prior_state=req.prior_state,
+                resume_from_node_id=req.resume_from_node_id,
+                approval_status=req.approval_status,
+                approval_token=req.approval_token,
             )
             return _to_worker_response(final_state)
         except ValueError as exc:
@@ -124,6 +151,7 @@ def create_worker_app(
                 error_message="Operator rejected human approval request.",
                 checkpoints=[],
                 state_snapshot=req.prior_state,
+                final_state=req.prior_state,
             )
 
         try:
@@ -160,6 +188,7 @@ def _to_worker_response(state: dict[str, Any]) -> WorkerExecutionResponse:
         run_status=state["run_status"],
         step_index=state["step_index"],
         current_node_id=state["current_node_id"],
+        pause_requested=bool(state.get("pause_requested", False)),
         paused_at_node_id=state["paused_at_node_id"],
         pause_summary=state["pause_summary"],
         cumulative_spend=state["cumulative_spend"],
@@ -168,4 +197,5 @@ def _to_worker_response(state: dict[str, Any]) -> WorkerExecutionResponse:
         error_message=state["error_message"],
         checkpoints=state["checkpoints"],
         state_snapshot=snapshot,
+        final_state=snapshot,
     )

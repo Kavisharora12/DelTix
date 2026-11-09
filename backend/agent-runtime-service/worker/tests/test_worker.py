@@ -12,6 +12,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 from core.state_graph import DynamicLangGraphEngine  # noqa: E402
 from services.executor_service import (  # noqa: E402
     LangChainGeminiCascade,
+    PayPalAgentToolkitDispatcher,
+    build_paypal_toolkit_actions,
     compute_tool_idempotency_key,
     evaluate_condition_expression,
     evaluate_math_expression,
@@ -456,6 +458,77 @@ class TestDynamicLangGraphWorker(unittest.TestCase):
             "ten_1", "run_1", 3, "paypal.captures.refund", "EXECUTE", {"b": 2, "a": 1}
         )
         self.assertEqual(k1, k2)
+
+    def test_paypal_agent_toolkit_dispatcher_and_least_privilege_actions(self) -> None:
+        # 1. Verify capability_id maps to PayPal Toolkit Configuration.actions
+        resource, action, actions_cfg = build_paypal_toolkit_actions("paypal.orders.create")
+        self.assertEqual(resource, "orders")
+        self.assertEqual(action, "create")
+        self.assertEqual(actions_cfg, {"orders": {"create": True}})
+
+        # 2. Verify read_only=True blocks mutating actions in Configuration
+        with self.assertRaises(PermissionError):
+            build_paypal_toolkit_actions("paypal.invoices.send", read_only=True)
+
+        # 3. Verify PayPalAgentToolkitDispatcher fails closed when credentials are missing
+        unconfigured = PayPalAgentToolkitDispatcher(client_id="", client_secret="", sandbox=True)
+        with self.assertRaises(RuntimeError) as err_ctx:
+            _run_async(
+                unconfigured.dispatch_tool(
+                    run_id="run_1",
+                    tenant_id="ten_1",
+                    step_index=1,
+                    capability_id="paypal.orders.create",
+                    operation="EXECUTE",
+                    parameters={"amount_usd": 50.0},
+                )
+            )
+        self.assertIn("PAYPAL_CREDENTIALS_MISSING", str(err_ctx.exception))
+
+        # 4. Verify PayPalAgentToolkitDispatcher invokes matched LangChain BaseTool from toolkit.get_tools()
+        captured_actions: dict[str, Any] = {}
+
+        class _FakePayPalLangChainTool:
+            name = "create_order"
+
+            async def ainvoke(self, tool_input: dict[str, Any]) -> str:
+                return f'{{"id": "ORDER_PP_TOOLKIT_500", "status": "CREATED", "amount": {tool_input.get("amount_usd", 0)}}}'
+
+        class _FakePayPalToolkit:
+            def get_tools(self) -> list[Any]:
+                return [_FakePayPalLangChainTool()]
+
+        def _fake_factory(
+            client_id: str,
+            secret: str,
+            sandbox: bool,
+            actions: dict[str, dict[str, bool]],
+        ) -> Any:
+            captured_actions["client_id"] = client_id
+            captured_actions["sandbox"] = sandbox
+            captured_actions["actions"] = actions
+            return _FakePayPalToolkit()
+
+        dispatcher = PayPalAgentToolkitDispatcher(
+            client_id="pp_client_id_test",
+            client_secret="pp_secret_test",
+            sandbox=True,
+            toolkit_factory=_fake_factory,
+        )
+        result = _run_async(
+            dispatcher.dispatch_tool(
+                run_id="run_pp_1",
+                tenant_id="ten_pp_1",
+                step_index=2,
+                capability_id="paypal.orders.create",
+                operation="EXECUTE",
+                parameters={"amount_usd": 50.0, "currency": "USD"},
+            )
+        )
+        self.assertEqual(result["id"], "ORDER_PP_TOOLKIT_500")
+        self.assertEqual(result["toolkit"], "paypal-agent-toolkit")
+        self.assertEqual(captured_actions["actions"], {"orders": {"create": True}})
+        self.assertTrue(captured_actions["sandbox"])
 
 
 if __name__ == "__main__":

@@ -1,12 +1,42 @@
 package config
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
+
+func LoadDotEnvFiles() {
+	candidates := []string{".env", "../.env", "../../.env", "../../../.env"}
+	for _, path := range candidates {
+		f, err := os.Open(path)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			idx := strings.IndexByte(line, '=')
+			if idx <= 0 {
+				continue
+			}
+			key := strings.TrimSpace(line[:idx])
+			val := strings.TrimSpace(line[idx+1:])
+			val = strings.Trim(val, `"'`)
+			if key != "" && os.Getenv(key) == "" && val != "" {
+				_ = os.Setenv(key, val)
+			}
+		}
+		_ = f.Close()
+	}
+}
 
 var (
 	ErrMissingDatabaseURL     = errors.New("missing SUPABASE_DB_URL")
@@ -43,6 +73,7 @@ type GoogleAuthConfig struct {
 }
 
 func LoadPostgresConfigFromEnv() (PostgresConfig, error) {
+	LoadDotEnvFiles()
 	dbURL := os.Getenv("SUPABASE_DB_URL")
 	if dbURL == "" {
 		return PostgresConfig{}, ErrMissingDatabaseURL

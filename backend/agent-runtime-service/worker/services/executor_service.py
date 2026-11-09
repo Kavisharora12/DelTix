@@ -35,6 +35,17 @@ except ImportError:  # pragma: no cover
     ChatGoogleGenerativeAI = None  # type: ignore[assignment,misc]
 
 try:
+    from paypal_agent_toolkit.langchain.toolkit import PayPalToolkit
+    from paypal_agent_toolkit.shared.configuration import Configuration, Context
+except ImportError:  # pragma: no cover
+    try:
+        from paypal_agent_toolkit import PayPalToolkit  # type: ignore[no-redef]
+    except ImportError:
+        PayPalToolkit = None  # type: ignore[assignment,misc]
+    Configuration = None  # type: ignore[assignment,misc]
+    Context = None  # type: ignore[assignment,misc]
+
+try:
     from langsmith import traceable
 except ImportError:  # pragma: no cover
     def traceable(*_args: Any, **_kwargs: Any) -> Callable[[Any], Any]:
@@ -241,7 +252,6 @@ class HTTPToolDispatcher(ToolDispatcherProtocol):
         approval_token: str | None = None,
     ) -> dict[str, Any]:
         """Calls POST /internal/v1/tools/dispatch on Capability & Policy Service (:8084)."""
-        # TODO(workstream-5): Ensure Capability & Policy Service (:8084) is running in production.
         idempotency_key = compute_tool_idempotency_key(
             tenant_id=tenant_id,
             run_id=run_id,
@@ -272,6 +282,183 @@ class HTTPToolDispatcher(ToolDispatcherProtocol):
             )
             resp.raise_for_status()
             return resp.json()
+
+
+def build_paypal_toolkit_actions(
+    capability_id: str,
+    read_only: bool = False,
+) -> tuple[str, str, dict[str, dict[str, bool]]]:
+    """Maps a capability_id (e.g. 'paypal.orders.create', 'paypal.invoices.list') to PayPal Agent Toolkit Configuration.actions."""
+    cleaned = capability_id.strip()
+    if cleaned.startswith("paypal."):
+        cleaned = cleaned[len("paypal.") :]
+
+    parts = [p for p in re.split(r"[._-]+", cleaned) if p]
+    if len(parts) < 2:
+        raise ValueError(
+            f"INVALID_PAYPAL_CAPABILITY: '{capability_id}' must specify resource and action (e.g. 'paypal.orders.create')"
+        )
+
+    # Support both 'orders.create' and 'create_order' conventions
+    known_verbs = {
+        "create",
+        "get",
+        "list",
+        "capture",
+        "pay",
+        "refund",
+        "send",
+        "cancel",
+        "delete",
+        "accept",
+        "update",
+        "recordpayment",
+        "recordrefund",
+        "sendreminder",
+        "generateqrc",
+    }
+    if parts[0].lower() in known_verbs and len(parts) >= 2:
+        action = parts[0]
+        resource = "_".join(parts[1:])
+        if not resource.endswith("s") and resource not in ("shipment_tracking",):
+            resource = resource + "s"
+    else:
+        resource = "_".join(parts[:-1])
+        action = parts[-1]
+
+    # Normalize common PayPal Agent Toolkit action aliases
+    if resource == "captures" and action == "refund":
+        resource = "orders"
+    if read_only and action.lower() not in ("get", "list"):
+        raise PermissionError(
+            f"READ_ONLY_POLICY_VIOLATION: cannot enable mutating PayPal Toolkit action '{resource}.{action}'"
+        )
+
+    actions_dict = {resource: {action: True}}
+    return resource, action, actions_dict
+
+
+class PayPalAgentToolkitDispatcher(ToolDispatcherProtocol):
+    """Executes PayPal tools via the official paypal-agent-toolkit LangChain integration with least-privilege Configuration."""
+
+    def __init__(
+        self,
+        client_id: str,
+        client_secret: str,
+        sandbox: bool = True,
+        fallback_http_dispatcher: ToolDispatcherProtocol | None = None,
+        toolkit_factory: Callable[[str, str, bool, dict[str, dict[str, bool]]], Any] | None = None,
+    ) -> None:
+        self._client_id = client_id.strip()
+        self._client_secret = client_secret.strip()
+        self._sandbox = sandbox
+        self._fallback = fallback_http_dispatcher
+        self._toolkit_factory = toolkit_factory
+
+    def _create_toolkit(self, actions_dict: dict[str, dict[str, bool]]) -> Any:
+        if self._toolkit_factory is not None:
+            return self._toolkit_factory(
+                self._client_id, self._client_secret, self._sandbox, actions_dict
+            )
+        if not self._client_id or not self._client_secret:
+            raise RuntimeError(
+                "PAYPAL_CREDENTIALS_MISSING: PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET must be set in .env"
+            )
+        if PayPalToolkit is None:
+            raise RuntimeError(
+                "PAYPAL_TOOLKIT_NOT_INSTALLED: run 'pip install paypal-agent-toolkit'"
+            )
+        if Configuration is not None and Context is not None:
+            cfg = Configuration(
+                context=Context(sandbox=self._sandbox),
+                actions=actions_dict,
+            )
+            return PayPalToolkit(
+                client_id=self._client_id,
+                secret=self._client_secret,
+                configuration=cfg,
+            )
+        return PayPalToolkit(
+            client_id=self._client_id,
+            client_secret=self._client_secret,
+            sandbox=self._sandbox,
+        )
+
+    @traceable(run_type="tool", name="deltix_paypal_agent_toolkit")
+    async def dispatch_tool(
+        self,
+        run_id: str,
+        tenant_id: str,
+        step_index: int,
+        capability_id: str,
+        operation: str,
+        parameters: dict[str, Any],
+        approval_token: str | None = None,
+    ) -> dict[str, Any]:
+        """Executes a scoped tool from PayPalToolkit.get_tools() and returns structured output."""
+        idempotency_key = compute_tool_idempotency_key(
+            tenant_id=tenant_id,
+            run_id=run_id,
+            step_index=step_index,
+            capability_id=capability_id,
+            operation=operation,
+            parameters=parameters,
+        )
+        resource, action, actions_dict = build_paypal_toolkit_actions(capability_id)
+        toolkit = self._create_toolkit(actions_dict)
+        tools = list(toolkit.get_tools() or [])
+        if not tools:
+            raise RuntimeError(
+                f"PAYPAL_TOOLKIT_EMPTY: no LangChain tools returned for actions={actions_dict}"
+            )
+
+        selected_tool = _match_paypal_langchain_tool(tools, capability_id, resource, action)
+        tool_input = {
+            k: v
+            for k, v in parameters.items()
+            if not str(k).startswith("_")
+        }
+
+        if hasattr(selected_tool, "ainvoke"):
+            raw_res = await selected_tool.ainvoke(tool_input)
+        elif hasattr(selected_tool, "invoke"):
+            raw_res = selected_tool.invoke(tool_input)
+        elif callable(selected_tool):
+            raw_res = selected_tool(**tool_input)
+        else:
+            raise RuntimeError(f"Selected PayPal tool '{selected_tool}' is not invokable")
+
+        parsed = _parse_json_or_text_response(raw_res, getattr(selected_tool, "name", capability_id))
+        parsed["capability_id"] = capability_id
+        parsed["idempotency_key"] = idempotency_key
+        parsed["toolkit"] = "paypal-agent-toolkit"
+        parsed["sandbox"] = self._sandbox
+        return parsed
+
+
+def _match_paypal_langchain_tool(
+    tools: list[Any],
+    capability_id: str,
+    resource: str,
+    action: str,
+) -> Any:
+    """Matches a LangChain BaseTool from PayPalToolkit.get_tools() by name/resource/action."""
+    if len(tools) == 1:
+        return tools[0]
+
+    singular_resource = resource[:-1] if resource.endswith("s") else resource
+    candidates = (
+        capability_id.lower(),
+        f"{action}_{singular_resource}".lower(),
+        f"{action}_{resource}".lower(),
+        f"{resource}_{action}".lower(),
+        action.lower(),
+    )
+    for t in tools:
+        t_name = str(getattr(t, "name", "")).lower()
+        if any(c in t_name or t_name in c for c in candidates):
+            return t
+    return tools[0]
 
 
 class HTTPMemoryClient(MemoryClientProtocol):
