@@ -12,8 +12,10 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/deltix/agent-compiler-service/config"
 	compilermodels "github.com/deltix/agent-compiler-service/models"
 	sharedmodels "github.com/deltix/shared/models"
 	"github.com/jackc/pgx/v5"
@@ -21,7 +23,8 @@ import (
 )
 
 var (
-	ErrSpecNotFound = errors.New("agent specification not found")
+	ErrSpecNotFound            = errors.New("agent specification not found")
+	ErrAllGeminiModelsExhausted = errors.New("all gemini models exhausted or rate-limited in sliding window")
 )
 
 type CompilationLogEntry struct {
@@ -35,7 +38,7 @@ type CompilationLogEntry struct {
 	Diagnostics          interface{}
 }
 
-// LLMSynthesisOutput represents the structured JSON response from the LLM compiler model.
+// LLMSynthesisOutput represents the structured JSON response from the Gemini compiler model.
 type LLMSynthesisOutput struct {
 	NeedsClarification     bool                                   `json:"needs_clarification"`
 	ClarificationQuestions []compilermodels.ClarificationQuestion `json:"clarification_questions,omitempty"`
@@ -54,27 +57,90 @@ type IRSynthesizer interface {
 	) (LLMSynthesisOutput, error)
 }
 
-// OpenAIIRSynthesizer calls the configured OpenAI-compatible /chat/completions endpoint with JSON mode.
-type OpenAIIRSynthesizer struct {
-	baseURL    string
-	apiKey     string
-	model      string
-	httpClient *http.Client
+// SlidingWindowLimiter enforces a per-model sliding-window rate limit so when one Gemini model
+// hits its per-window quota, the synthesizer immediately falls back to the next Gemini model.
+type SlidingWindowLimiter struct {
+	mu          sync.Mutex
+	window      time.Duration
+	maxRequests int
+	timestamps  map[string][]time.Time
 }
 
-func NewOpenAIIRSynthesizer(baseURL string, apiKey string, model string, httpClient *http.Client) *OpenAIIRSynthesizer {
+func NewSlidingWindowLimiter(maxRequests int, window time.Duration) *SlidingWindowLimiter {
+	if maxRequests <= 0 {
+		maxRequests = 15
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+	return &SlidingWindowLimiter{
+		window:      window,
+		maxRequests: maxRequests,
+		timestamps:  make(map[string][]time.Time),
+	}
+}
+
+func (l *SlidingWindowLimiter) Allow(model string, now time.Time) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	cutoff := now.Add(-l.window)
+	history := l.timestamps[model]
+
+	// Slide the window: keep only timestamps strictly within [now - window, now]
+	validIdx := 0
+	for _, ts := range history {
+		if ts.After(cutoff) {
+			history[validIdx] = ts
+			validIdx++
+		}
+	}
+	history = history[:validIdx]
+
+	if len(history) >= l.maxRequests {
+		l.timestamps[model] = history
+		return false
+	}
+
+	l.timestamps[model] = append(history, now)
+	return true
+}
+
+const geminiAPIBaseURL = "https://generativelanguage.googleapis.com/v1beta"
+
+// GeminiIRSynthesizer calls Google Gemini's generateContent REST API using a multi-model
+// fallback cascade guarded by a per-model SlidingWindowLimiter.
+type GeminiIRSynthesizer struct {
+	apiKey     string
+	models     []string
+	limiter    *SlidingWindowLimiter
+	httpClient *http.Client
+	nowUTC     func() time.Time
+}
+
+func NewGeminiIRSynthesizer(
+	apiKey string,
+	models []string,
+	rpmPerModel int,
+	window time.Duration,
+	httpClient *http.Client,
+) *GeminiIRSynthesizer {
+	if len(models) == 0 {
+		models = config.DefaultGeminiModels
+	}
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &OpenAIIRSynthesizer{
-		baseURL:    strings.TrimRight(baseURL, "/"),
+	return &GeminiIRSynthesizer{
 		apiKey:     apiKey,
-		model:      model,
+		models:     models,
+		limiter:    NewSlidingWindowLimiter(rpmPerModel, window),
 		httpClient: httpClient,
+		nowUTC:     func() time.Time { return time.Now().UTC() },
 	}
 }
 
-func (o *OpenAIIRSynthesizer) Synthesize(
+func (g *GeminiIRSynthesizer) Synthesize(
 	ctx context.Context,
 	tenantID string,
 	userID string,
@@ -82,11 +148,122 @@ func (o *OpenAIIRSynthesizer) Synthesize(
 	req compilermodels.CompileRequest,
 	activeCapabilities []CapabilityMetadata,
 ) (LLMSynthesisOutput, error) {
+	systemPrompt, userPrompt := buildGeminiCompilerPrompts(tenantID, userID, agentID, req, activeCapabilities)
+
+	var attemptErrors []string
+	now := g.nowUTC()
+
+	for _, model := range g.models {
+		if !g.limiter.Allow(model, now) {
+			attemptErrors = append(attemptErrors, fmt.Sprintf("%s: sliding window rate limit reached", model))
+			continue
+		}
+
+		out, retryNextModel, err := g.callGeminiModel(ctx, model, systemPrompt, userPrompt)
+		if err == nil {
+			return out, nil
+		}
+
+		attemptErrors = append(attemptErrors, fmt.Sprintf("%s: %v", model, err))
+		if !retryNextModel {
+			return LLMSynthesisOutput{}, err
+		}
+	}
+
+	return LLMSynthesisOutput{}, fmt.Errorf("%w: [%s]", ErrAllGeminiModelsExhausted, strings.Join(attemptErrors, "; "))
+}
+
+func (g *GeminiIRSynthesizer) callGeminiModel(
+	ctx context.Context,
+	model string,
+	systemPrompt string,
+	userPrompt string,
+) (LLMSynthesisOutput, bool, error) {
+	geminiBody, err := json.Marshal(map[string]interface{}{
+		"systemInstruction": map[string]interface{}{
+			"parts": []map[string]string{
+				{"text": systemPrompt},
+			},
+		},
+		"contents": []map[string]interface{}{
+			{
+				"role": "user",
+				"parts": []map[string]string{
+					{"text": userPrompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":      0.0,
+			"responseMimeType": "application/json",
+		},
+	})
+	if err != nil {
+		return LLMSynthesisOutput{}, false, fmt.Errorf("marshal gemini request: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s/models/%s:generateContent?key=%s", geminiAPIBaseURL, model, g.apiKey)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(geminiBody))
+	if err != nil {
+		return LLMSynthesisOutput{}, false, fmt.Errorf("create gemini http request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := g.httpClient.Do(httpReq)
+	if err != nil {
+		// Network timeout or transient error -> try next Gemini model in cascade
+		return LLMSynthesisOutput{}, true, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// On 429 (Quota/Rate Limit), 404 (Model unavailable), or 5xx (Server Overload) -> try next Gemini model
+	if resp.StatusCode == http.StatusTooManyRequests ||
+		resp.StatusCode == http.StatusNotFound ||
+		resp.StatusCode >= http.StatusInternalServerError {
+		return LLMSynthesisOutput{}, true, fmt.Errorf("status %d", resp.StatusCode)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return LLMSynthesisOutput{}, false, fmt.Errorf("unexpected status %d", resp.StatusCode)
+	}
+
+	var geminiResp struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&geminiResp); err != nil {
+		return LLMSynthesisOutput{}, true, fmt.Errorf("decode gemini response: %w", err)
+	}
+	if len(geminiResp.Candidates) == 0 || len(geminiResp.Candidates[0].Content.Parts) == 0 {
+		return LLMSynthesisOutput{}, true, errors.New("empty candidates from gemini")
+	}
+
+	rawJSON := geminiResp.Candidates[0].Content.Parts[0].Text
+	var out LLMSynthesisOutput
+	if err := json.Unmarshal([]byte(rawJSON), &out); err != nil {
+		return LLMSynthesisOutput{}, true, fmt.Errorf("unmarshal structured json from %s: %w", model, err)
+	}
+
+	return out, false, nil
+}
+
+func buildGeminiCompilerPrompts(
+	tenantID string,
+	userID string,
+	agentID string,
+	req compilermodels.CompileRequest,
+	activeCapabilities []CapabilityMetadata,
+) (string, string) {
 	capsJSON, _ := json.Marshal(activeCapabilities)
 	clarifJSON, _ := json.Marshal(req.Clarifications)
 
-	systemPrompt := fmt.Sprintf(`You are the DelTix Deterministic Financial AI Agent Compiler.
-Your job is to compile a user's natural language request into a JSON response matching LLMSynthesisOutput:
+	systemPrompt := fmt.Sprintf(`You are the DelTix Deterministic Financial AI Agent Compiler powered by Google Gemini.
+Your job is to compile a user's natural language request into a JSON object matching LLMSynthesisOutput:
 {
   "needs_clarification": boolean,
   "clarification_questions": [{"field": string, "question": string, "why_required": string, "suggestions": [string]}],
@@ -103,63 +280,11 @@ Rules:
 		string(capsJSON), agentID, tenantID, userID,
 	)
 
-	userContent := fmt.Sprintf(
+	userPrompt := fmt.Sprintf(
 		"Agent Name: %s\nCategory: %s\nPrompt: %s\nClarifications: %s",
 		req.Name, req.Category, req.NaturalLanguagePrompt, string(clarifJSON),
 	)
-
-	chatReqBody, err := json.Marshal(map[string]interface{}{
-		"model":       o.model,
-		"temperature": 0.0,
-		"response_format": map[string]string{
-			"type": "json_object",
-		},
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userContent},
-		},
-	})
-	if err != nil {
-		return LLMSynthesisOutput{}, fmt.Errorf("marshal llm request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, o.baseURL+"/chat/completions", bytes.NewReader(chatReqBody))
-	if err != nil {
-		return LLMSynthesisOutput{}, fmt.Errorf("create llm http request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+o.apiKey)
-
-	resp, err := o.httpClient.Do(httpReq)
-	if err != nil {
-		return LLMSynthesisOutput{}, fmt.Errorf("call llm endpoint: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return LLMSynthesisOutput{}, fmt.Errorf("llm endpoint returned status %d", resp.StatusCode)
-	}
-
-	var completionResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&completionResp); err != nil {
-		return LLMSynthesisOutput{}, fmt.Errorf("decode llm completion response: %w", err)
-	}
-	if len(completionResp.Choices) == 0 {
-		return LLMSynthesisOutput{}, errors.New("llm returned zero choices")
-	}
-
-	var out LLMSynthesisOutput
-	if err := json.Unmarshal([]byte(completionResp.Choices[0].Message.Content), &out); err != nil {
-		return LLMSynthesisOutput{}, fmt.Errorf("unmarshal llm structured json output: %w", err)
-	}
-
-	return out, nil
+	return systemPrompt, userPrompt
 }
 
 // SpecRepository persists compiled AgentSpec records and compilation logs in Supabase PostgreSQL.
@@ -373,9 +498,9 @@ func NewCompilerService(
 	}
 }
 
-// Compile executes the full compilation pipeline backed by Supabase PostgreSQL:
+// Compile executes the full compilation pipeline backed by Supabase PostgreSQL & Google Gemini:
 // 1. Queries active PayPal capabilities from Supabase capability_registry.
-// 2. Invokes the structured LLM IRSynthesizer (returning CLARIFICATION_REQUIRED if constraints are missing).
+// 2. Invokes GeminiIRSynthesizer (sliding-window rate limiter + multi-model fallback across Gemini models).
 // 3. Validates the synthesized AgentIR against all deterministic guardrails and graph traversal checks.
 // 4. Signs the HMAC-SHA256 readiness_token and persists the final AgentSpec & log to Supabase PostgreSQL.
 func (s *CompilerService) Compile(

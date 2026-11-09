@@ -57,10 +57,10 @@
 
 ## 4. Workstream 2 — Agent Compiler Service (`backend/agent-compiler-service/`)
 - [x] **Go Module** (`backend/agent-compiler-service/go.mod` — `github.com/deltix/agent-compiler-service`)
-- [x] **Compiler Config** (`config/config.go`)
+- [x] **Compiler Config** (`config/config.go` — `GEMINI_API_KEY`, multi-model list, sliding-window RPM config)
 - [x] **Compiler Request/Response & Clarification Models** (`models/compiler_models.go`)
 - [x] **Deterministic Schema, Tarjan/DFS Graph Topology Validator & Pre-Flight Mock Test Harness** (`services/validator_service.go`)
-- [x] **LLM Requirement Extraction, Clarification, Agent IR Synthesis, HMAC Signer & Supabase Repository** (`services/compiler_service.go`)
+- [x] **Gemini Multi-Model Fallback Cascade + Sliding-Window Rate Limiter, HMAC Signer & Supabase Repository** (`services/compiler_service.go`)
 - [x] **Compiler HTTP Handlers, Routes & Entrypoint** (`handlers/compiler_handler.go`, `routes/routes.go`, `cmd/main.go`)
 - [x] **Compiler Unit & Table-Driven Validation Tests** (`tests/compiler_test.go`)
 
@@ -80,15 +80,15 @@
 ---
 
 ## 6. Workstream 3 — Agent Runtime Service (`backend/agent-runtime-service/`)
-- [ ] Go Control Plane Config & Models (`config/config.go`, `models/runtime_models.go`)
-- [ ] Supabase Run & Checkpoint Repository (`services/checkpoint_service.go`)
-- [ ] Redsync Distributed Run Lock, Readiness Token Verifier & Internal HTTP Worker Client (`services/runtime_service.go`)
-- [ ] Human-in-the-Loop Pause & Cryptographic Token Resumption (`services/runtime_service.go`)
-- [ ] Go Runtime Handlers, Routes & Entrypoint (`handlers/runtime_handler.go`, `routes/routes.go`, `cmd/main.go`)
-- [ ] Python LangGraph Worker Config & FastAPI HTTP Bridge (`worker/config/config.py`, `worker/api/http_server.py`)
-- [ ] Dynamic `Agent IR` ➡️ LangGraph `StateGraph` Builder (`worker/core/state_graph.py`)
-- [ ] Node Executor & LangSmith Tracing Integration (`worker/services/executor_service.py`, `worker/main.py`)
-- [ ] Go & Python Runtime Tests (`tests/runtime_test.go`, `worker/tests/test_worker.py`)
+- [x] **Python LangGraph Worker Config & FastAPI HTTP Bridge** (`worker/requirements.txt`, `worker/config/config.py`, `worker/api/grpc_server.py`, `worker/main.py`)
+- [x] **Dynamic `Agent IR` ➡️ LangGraph `StateGraph` Builder & Non-Blocking Approval Interrupts** (`worker/core/state_graph.py`)
+- [x] **LangChain Gemini Sliding-Window Multi-Model Cascade, Safe AST Router & LangSmith Tracing** (`worker/services/executor_service.py`)
+- [x] **Python LangGraph Worker Unit Tests** (`worker/tests/test_worker.py`)
+- [ ] Go Control Plane Config & Models (`config/config.go`, `models/runtime_models.go`) — *Phase 2*
+- [ ] Supabase Run & Checkpoint Repository (`services/checkpoint_service.go`) — *Phase 2*
+- [ ] Distributed Redis Run Lock, Readiness Token Verifier & Internal HTTP Worker Client (`services/runtime_service.go`) — *Phase 2*
+- [ ] Human-in-the-Loop Pause, Cryptographic Token Resumption & SSE Stream Broadcaster (`services/runtime_service.go`) — *Phase 2*
+- [ ] Go Runtime Handlers, Routes, Entrypoint & Tests (`handlers/runtime_handler.go`, `routes/routes.go`, `cmd/main.go`, `tests/runtime_test.go`) — *Phase 2*
 
 ---
 

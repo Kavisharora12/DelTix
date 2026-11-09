@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/deltix/agent-compiler-service/handlers"
 	compilermodels "github.com/deltix/agent-compiler-service/models"
@@ -348,5 +350,83 @@ func TestValidatorDetectsGraphAndPolicyViolations(t *testing.T) {
 	}
 	if report.PolicyCompliant {
 		t.Fatal("expected PolicyCompliant=false due to missing approval gate on sensitive tool")
+	}
+}
+
+type roundTripFunc func(req *http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestGeminiSlidingWindowAndModelFallbackCascade(t *testing.T) {
+	var modelsCalled []string
+
+	// In-memory HTTP transport simulating Google Gemini API:
+	// - gemini-2.5-flash will be exhausted by sliding window (RPM=1) on 2nd call
+	// - gemini-2.5-pro returns 429 Too Many Requests
+	// - gemini-2.0-flash succeeds with structured JSON!
+	mockClient := &http.Client{
+		Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			path := r.URL.Path
+			modelsCalled = append(modelsCalled, path)
+
+			if strings.Contains(path, "gemini-2.5-pro") {
+				return &http.Response{
+					StatusCode: http.StatusTooManyRequests,
+					Body:       io.NopCloser(strings.NewReader(`{"error":"rate limit"}`)),
+					Header:     make(http.Header),
+				}, nil
+			}
+
+			payload := `{
+				"candidates": [{
+					"content": {
+						"parts": [{
+							"text": "{\"needs_clarification\": true, \"clarification_questions\": [{\"field\": \"max_budget_usd\", \"question\": \"Budget?\", \"why_required\": \"Required\"}]}"
+						}]
+					}
+				}]
+			}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(payload)),
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+			}, nil
+		}),
+	}
+
+	models := []string{"gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.0-flash"}
+	synth := services.NewGeminiIRSynthesizer(
+		"test_gemini_key",
+		models,
+		1,
+		time.Minute,
+		mockClient,
+	)
+
+	req := compilermodels.CompileRequest{
+		Name:                  "Test Agent",
+		Category:              "REFUNDS",
+		NaturalLanguagePrompt: "Refund order",
+	}
+
+	// 1st call: uses gemini-2.5-flash (fills its RPM=1 sliding window)
+	out1, err := synth.Synthesize(context.Background(), "ten_1", "usr_1", "agt_1", req, nil)
+	if err != nil || !out1.NeedsClarification {
+		t.Fatalf("1st call failed: err=%v, out=%+v", err, out1)
+	}
+
+	// 2nd call within same 60s window:
+	// - gemini-2.5-flash is skipped by SlidingWindowLimiter (RPM=1 reached)
+	// - gemini-2.5-pro returns HTTP 429
+	// - gemini-2.0-flash succeeds!
+	out2, err := synth.Synthesize(context.Background(), "ten_1", "usr_1", "agt_2", req, nil)
+	if err != nil || !out2.NeedsClarification {
+		t.Fatalf("2nd call fallback cascade failed: err=%v, out=%+v", err, out2)
+	}
+
+	if len(modelsCalled) != 3 {
+		t.Fatalf("expected 3 HTTP calls across models (1st: flash, 2nd: pro->429, 3rd: 2.0-flash->200), got %v", modelsCalled)
 	}
 }

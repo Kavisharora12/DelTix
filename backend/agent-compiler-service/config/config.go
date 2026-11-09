@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	sharedconfig "github.com/deltix/shared/config"
@@ -11,17 +13,26 @@ import (
 
 var (
 	ErrMissingReadinessSecret = errors.New("missing READINESS_HMAC_SECRET")
-	ErrMissingLLMAPIKey       = errors.New("missing LLM_API_KEY")
+	ErrMissingGeminiAPIKey    = errors.New("missing GEMINI_API_KEY")
 )
+
+var DefaultGeminiModels = []string{
+	"gemini-2.5-flash",
+	"gemini-2.5-pro",
+	"gemini-2.0-flash",
+	"gemini-2.0-flash-lite",
+	"gemini-1.5-flash",
+}
 
 type CompilerConfig struct {
 	HTTPPort                   string
 	ReadTimeout                time.Duration
 	WriteTimeout               time.Duration
 	ReadinessHMACSecret        string
-	LLMAPIKey                  string
-	LLMModel                   string
-	LLMBaseURL                 string
+	GeminiAPIKey               string
+	GeminiModels               []string
+	GeminiRPMPerModel          int
+	GeminiSlidingWindow        time.Duration
 	Postgres                   sharedconfig.PostgresConfig
 	MemoryServiceURL           string
 	CapabilityPolicyServiceURL string
@@ -38,9 +49,17 @@ func LoadCompilerConfigFromEnv() (CompilerConfig, error) {
 		return CompilerConfig{}, ErrMissingReadinessSecret
 	}
 
-	llmKey := os.Getenv("LLM_API_KEY")
-	if llmKey == "" {
-		return CompilerConfig{}, ErrMissingLLMAPIKey
+	geminiKey := strings.TrimSpace(os.Getenv("GEMINI_API_KEY"))
+	if geminiKey == "" {
+		geminiKey = strings.TrimSpace(os.Getenv("LLM_API_KEY"))
+	}
+	if geminiKey == "" {
+		return CompilerConfig{}, ErrMissingGeminiAPIKey
+	}
+
+	rpmPerModel, err := parseEnvInt("GEMINI_RPM_PER_MODEL", 15)
+	if err != nil {
+		return CompilerConfig{}, fmt.Errorf("parse GEMINI_RPM_PER_MODEL: %w", err)
 	}
 
 	return CompilerConfig{
@@ -48,9 +67,10 @@ func LoadCompilerConfigFromEnv() (CompilerConfig, error) {
 		ReadTimeout:         15 * time.Second,
 		WriteTimeout:        45 * time.Second,
 		ReadinessHMACSecret: hmacSecret,
-		LLMAPIKey:           llmKey,
-		LLMModel:            getEnvOrDefault("LLM_MODEL", "gpt-4o-mini"),
-		LLMBaseURL:          getEnvOrDefault("LLM_BASE_URL", "https://api.openai.com/v1"),
+		GeminiAPIKey:        geminiKey,
+		GeminiModels:        parseGeminiModels(os.Getenv("GEMINI_MODELS")),
+		GeminiRPMPerModel:   rpmPerModel,
+		GeminiSlidingWindow: time.Minute,
 		Postgres:            pgCfg,
 
 		// TODO(workstream-4): Query Mem0 Memory Service for long-term tenant compilation preferences once integrated.
@@ -60,10 +80,36 @@ func LoadCompilerConfigFromEnv() (CompilerConfig, error) {
 	}, nil
 }
 
+func parseGeminiModels(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return DefaultGeminiModels
+	}
+	parts := strings.Split(raw, ",")
+	var models []string
+	for _, p := range parts {
+		trimmed := strings.TrimSpace(p)
+		if trimmed != "" {
+			models = append(models, trimmed)
+		}
+	}
+	if len(models) == 0 {
+		return DefaultGeminiModels
+	}
+	return models
+}
+
 func getEnvOrDefault(key string, fallback string) string {
 	val := os.Getenv(key)
 	if val == "" {
 		return fallback
 	}
 	return val
+}
+
+func parseEnvInt(key string, fallback int) (int, error) {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback, nil
+	}
+	return strconv.Atoi(raw)
 }

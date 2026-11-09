@@ -26,6 +26,8 @@ const (
 	NodeTypeLLMReasoning         NodeType = "LLM_REASONING"
 	NodeTypeToolExecution        NodeType = "TOOL_EXECUTION"
 	NodeTypeDeterministicProcess NodeType = "DETERMINISTIC_PROCESS"
+	NodeTypeDeterministicMath    NodeType = "DETERMINISTIC_MATH"
+	NodeTypeGroundingVerifier    NodeType = "GROUNDING_VERIFIER"
 	NodeTypeConditionalRouter    NodeType = "CONDITIONAL_ROUTER"
 	NodeTypeHumanApproval        NodeType = "HUMAN_APPROVAL"
 	NodeTypeMemoryRetrieval      NodeType = "MEMORY_RETRIEVAL"
@@ -37,6 +39,8 @@ func (nt NodeType) IsValid() bool {
 	case NodeTypeLLMReasoning,
 		NodeTypeToolExecution,
 		NodeTypeDeterministicProcess,
+		NodeTypeDeterministicMath,
+		NodeTypeGroundingVerifier,
 		NodeTypeConditionalRouter,
 		NodeTypeHumanApproval,
 		NodeTypeMemoryRetrieval,
@@ -114,14 +118,19 @@ type RetryConfig struct {
 }
 
 type NodePayload struct {
-	CapabilityID   string                 `json:"capability_id,omitempty"`
-	Operation      string                 `json:"operation,omitempty"`
-	PromptTemplate string                 `json:"prompt_template,omitempty"`
-	Temperature    float64                `json:"temperature,omitempty"`
-	ConditionType  string                 `json:"condition_type,omitempty"`
-	Expression     string                 `json:"expression,omitempty"`
-	ToleranceCents int                    `json:"tolerance_cents,omitempty"`
-	StaticOutput   map[string]interface{} `json:"static_output,omitempty"`
+	CapabilityID         string                 `json:"capability_id,omitempty"`
+	Operation            string                 `json:"operation,omitempty"`
+	PromptTemplate       string                 `json:"prompt_template,omitempty"`
+	Temperature          float64                `json:"temperature,omitempty"`
+	ConditionType        string                 `json:"condition_type,omitempty"`
+	Expression           string                 `json:"expression,omitempty"`
+	TargetVariable       string                 `json:"target_variable,omitempty"`
+	ToleranceCents       int                    `json:"tolerance_cents,omitempty"`
+	RequiredFields       []string               `json:"required_fields,omitempty"`
+	MinConfidence        float64                `json:"min_confidence,omitempty"`
+	RequireVerbatimQuote bool                   `json:"require_verbatim_quote,omitempty"`
+	FailToHumanApproval  bool                   `json:"fail_to_human_approval,omitempty"`
+	StaticOutput         map[string]interface{} `json:"static_output,omitempty"`
 }
 
 type NodeDefinition struct {

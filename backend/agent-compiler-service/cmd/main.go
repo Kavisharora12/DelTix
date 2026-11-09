@@ -44,13 +44,19 @@ func run(logger *slog.Logger) error {
 
 	specRepo := services.NewPostgresSpecRepository(pgPool)
 	capabilityCatalog := services.NewPostgresCapabilityCatalog(pgPool)
-	llmSynthesizer := services.NewOpenAIIRSynthesizer(cfg.LLMBaseURL, cfg.LLMAPIKey, cfg.LLMModel, nil)
+	geminiSynthesizer := services.NewGeminiIRSynthesizer(
+		cfg.GeminiAPIKey,
+		cfg.GeminiModels,
+		cfg.GeminiRPMPerModel,
+		cfg.GeminiSlidingWindow,
+		nil,
+	)
 	validator := services.NewValidatorService(capabilityCatalog)
 
 	compilerService := services.NewCompilerService(
 		specRepo,
 		capabilityCatalog,
-		llmSynthesizer,
+		geminiSynthesizer,
 		validator,
 		cfg.ReadinessHMACSecret,
 	)
@@ -67,7 +73,7 @@ func run(logger *slog.Logger) error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		logger.Info("starting DelTix Agent Compiler Service", "port", cfg.HTTPPort)
+		logger.Info("starting DelTix Agent Compiler Service", "port", cfg.HTTPPort, "gemini_models", cfg.GeminiModels)
 		if serveErr := server.ListenAndServe(); serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
 			errCh <- serveErr
 		}
