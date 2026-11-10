@@ -119,14 +119,10 @@
 ---
 
 ## 8. Frontend Dashboard & Documentation Suite (`frontend/`)
-- [x] **Master End-User Product Manual & Client UI Guide** (`frontend/docs.md`)
-  - Complete screen-by-screen client walkthrough: Landing Page, Dashboard, Compiler Studio, Sandbox Chatbot, Approval Modal, and Audit Ledger
+- [x] **Master End-User Product Manual & Client UI Wireframes** (`frontend/docs.md`)
+  - Complete screen-by-screen client walkthrough & wireframes: Landing Page, Dashboard, Compiler Studio, Sandbox Chatbot, Approval Modal, and Audit Ledger
   - Financial Prompt Contract, copy-paste prompt templates, interactive clarification drawer, and 4-step quick-start guide
-- [x] **Component Implementation Specifications** (`frontend/*.md`)
-  - [x] `01-landing-and-auth.md` — Landing Page, 7-Guardrail Playground & Google OAuth Workspace Auth
-  - [x] `02-agent-compiler-studio.md` — Prompt Editor, Clarification Drawer, React Flow DAG & Pre-Flight Scorecards
-  - [x] `03-agent-specs-library.md` — Compiled Agent Specs Catalog & HMAC Readiness Verification
-  - [x] `README.md` — Master Frontend Directory Index
+- [x] **Frontend README Index** (`frontend/README.md`)
 
 ---
 
