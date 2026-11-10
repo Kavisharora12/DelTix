@@ -1,5 +1,17 @@
 # DelTix Frontend — Client Documentation & UI Wireframes
 
+## Landing page
+
+👉 **[`landing/`](./landing/)** — the public landing page (Screen 1). Plain HTML, CSS and JS with no build step. See [`landing/README.md`](./landing/README.md) to run and configure it.
+
+```bash
+# from the repo root
+python3 -m http.server 3000
+# open http://localhost:3000/frontend/landing/
+```
+
+## Product manual
+
 All frontend UI component specifications, client prompting guidelines, and wireframes are consolidated in a single master document:
 
 👉 **[`docs.md`](./docs.md)** — **Complete End-User Product Manual & UI Component Wireframes.**

@@ -123,6 +123,9 @@
   - Complete screen-by-screen client walkthrough & wireframes: Landing Page, Dashboard, Compiler Studio, Sandbox Chatbot, Approval Modal, and Audit Ledger
   - Financial Prompt Contract, copy-paste prompt templates, interactive clarification drawer, and 4-step quick-start guide
 - [x] **Frontend README Index** (`frontend/README.md`)
+- [x] **Public Landing Page** (`frontend/landing/`)
+  - Static HTML/CSS/JS, no build step: nav with dropdowns, hero with dashboard mockup, 4-screen product tour, use cases, guardrails, developer section, FAQ
+  - Sign-in wired to the gateway: `/v1/auth/google/login?tenant_id=…&redirect=true`; API, docs and contact URLs set in `config.js`
 
 ---
 

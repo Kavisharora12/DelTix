@@ -92,7 +92,14 @@ Natural-Language Prompt
 
 ---
 
-## 4. Documentation Index
+## 4. Frontend
+
+* **Landing page:** [`frontend/landing/`](frontend/landing/) — static marketing page, sign-in wired to the API gateway. Run `python3 -m http.server 3000` from the repo root and open http://localhost:3000/frontend/landing/
+* **Product manual & wireframes:** [`frontend/docs.md`](frontend/docs.md)
+
+---
+
+## 5. Documentation Index
 
 The complete technical architecture documentation is located in [`docs/`](file:///d:/PayPal/DelTix/docs):
 
