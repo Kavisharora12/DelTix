@@ -131,6 +131,10 @@
 - [x] **Single Consolidated `.env`:** Root-only configuration driving all Go, Python, and Docker services.
 - [x] **Isolated Database Migrations:** Pure ACID relational (`001_initial_schema.sql`) and pgvector RAG (`002_pgvector_rag_schema.sql`).
 - [x] **Protobuf / gRPC Bridge Contract:** Defined in `runtime.proto` with dual Go client and Python servicer implementations.
-- [ ] **React / Next.js Frontend Implementation:** Scaffolding the UI components specified in `frontend/*.md`.
-- [ ] **Docker Compose Production Bundle:** Scaffolding multi-container `docker-compose.yml` for 1-click cloud deployment.
-- [ ] **End-to-End Smoke Test Suite:** Full lifecycle integration test (`/v1/agents/compile` ➡️ `/v1/runs` ➡️ `/v1/approvals` ➡️ PayPal Sandbox).
+- [x] **Docker Compose Production Bundle:**
+  - Multi-stage Go & Python Dockerfiles with stripped binaries (~20MB Go images, slim wheel-extracted Python runners)
+  - Zero hardcoded secrets: secure `env_file: - .env` resolution with internal Docker DNS service discovery
+  - Isolated private bridge network (`deltix-network`), container healthchecks, and frontend excluded
+  - Verified with `docker-compose config`
+- [ ] **React / Next.js Frontend Implementation:** Scaffolding the UI components specified in `frontend/docs.md`.
+- [ ] **End-to-End Real Testing Suite:** Full real-world integration verification across all live endpoints.

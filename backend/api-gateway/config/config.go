@@ -7,6 +7,7 @@ import (
 	"time"
 
 	sharedconfig "github.com/deltix/shared/config"
+	"strings"
 )
 
 type GatewayConfig struct {
@@ -15,6 +16,8 @@ type GatewayConfig struct {
 	WriteTimeout       time.Duration
 	RateLimitPerMinute int64
 	CookieSecure       bool
+	AllowDevAuth       bool
+	CORSOrigins        []string
 	Postgres           sharedconfig.PostgresConfig
 	Redis              sharedconfig.RedisConfig
 	GoogleAuth         sharedconfig.GoogleAuthConfig
@@ -47,17 +50,30 @@ func LoadGatewayConfigFromEnv() (GatewayConfig, error) {
 		return GatewayConfig{}, fmt.Errorf("parse GATEWAY_RATE_LIMIT_PER_MIN: %w", err)
 	}
 
+	corsRaw := os.Getenv("GATEWAY_CORS_ORIGINS")
+	var corsOrigins []string
+	if corsRaw != "" {
+		for _, o := range strings.Split(corsRaw, ",") {
+			if s := strings.TrimSpace(o); s != "" {
+				corsOrigins = append(corsOrigins, s)
+			}
+		}
+	}
+
+	allowDevAuth := os.Getenv("GATEWAY_ALLOW_DEV_AUTH") == "true" || os.Getenv("ALLOW_DEV_AUTH") == "true"
+
 	return GatewayConfig{
 		HTTPPort:           getEnvOrDefault("GATEWAY_HTTP_PORT", "8080"),
 		ReadTimeout:        15 * time.Second,
 		WriteTimeout:       30 * time.Second,
 		RateLimitPerMinute: rateLimit,
 		CookieSecure:       os.Getenv("GATEWAY_COOKIE_SECURE") == "true",
+		AllowDevAuth:       allowDevAuth,
+		CORSOrigins:        corsOrigins,
 		Postgres:           pgCfg,
 		Redis:              redisCfg,
 		GoogleAuth:         googleCfg,
 
-		// TODO: Connect downstream microservice endpoints once Compiler, Runtime, Memory, and Capability services are ready.
 		CompilerServiceURL:         getEnvOrDefault("COMPILER_SERVICE_URL", "http://localhost:8081"),
 		RuntimeServiceURL:          getEnvOrDefault("RUNTIME_SERVICE_URL", "http://localhost:8082"),
 		MemoryServiceURL:           getEnvOrDefault("MEMORY_SERVICE_URL", "http://localhost:8083"),

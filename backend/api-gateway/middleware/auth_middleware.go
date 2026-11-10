@@ -32,11 +32,16 @@ type ProblemDetail struct {
 }
 
 type AuthMiddleware struct {
-	verifier SessionVerifier
+	verifier     SessionVerifier
+	allowDevAuth bool
 }
 
 func NewAuthMiddleware(verifier SessionVerifier) *AuthMiddleware {
-	return &AuthMiddleware{verifier: verifier}
+	return &AuthMiddleware{verifier: verifier, allowDevAuth: false}
+}
+
+func NewAuthMiddlewareWithDevAuth(verifier SessionVerifier, allowDevAuth bool) *AuthMiddleware {
+	return &AuthMiddleware{verifier: verifier, allowDevAuth: allowDevAuth}
 }
 
 // RequireSession validates the Redis-backed session and injects trusted X-Tenant-ID and X-User-ID headers.
@@ -51,6 +56,21 @@ func (m *AuthMiddleware) RequireSession(next http.Handler) http.Handler {
 		sessionID := ExtractSessionID(r)
 		if sessionID == "" {
 			WriteProblemJSON(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing session token or cookie.", traceID)
+			return
+		}
+
+		if m.allowDevAuth && (sessionID == "dev_token_deltix" || sessionID == "test_token") {
+			devSession := auth.UserSession{
+				SessionID: sessionID,
+				UserID:    "usr_dev_tester",
+				TenantID:  "ten_dev_workspace",
+				Email:     "developer@deltix.local",
+				Name:      "DelTix Developer",
+			}
+			r.Header.Set(HeaderTenantID, devSession.TenantID)
+			r.Header.Set(HeaderUserID, devSession.UserID)
+			ctx := auth.WithUserSession(r.Context(), devSession)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 

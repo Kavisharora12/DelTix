@@ -1,0 +1,138 @@
+# =============================================================================
+# DELTIX — Production-Grade Microservices Compose (docker-compose.yml)
+# Zero hardcoded secrets: All credentials loaded securely from root .env
+# Internal service discovery over private bridge network (deltix-network)
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. API Gateway (:8080) — Public Entrypoint & Reverse Proxy Hub
+  # ---------------------------------------------------------------------------
+  api-gateway:
+    container_name: deltix-api-gateway
+    build:
+      context: .
+      dockerfile: backend/api-gateway/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Internal container service discovery DNS URLs (non-secret network topology)
+      COMPILER_SERVICE_URL: http://agent-compiler-service:8081
+      RUNTIME_SERVICE_URL: http://agent-runtime-service:8082
+      CAPABILITY_POLICY_SERVICE_URL: http://capability-policy-service:8084
+      MEMORY_SERVICE_URL: http://memory-service:8083
+    ports:
+      - "8080:8080"
+    depends_on:
+      agent-compiler-service:
+        condition: service_healthy
+      agent-runtime-service:
+        condition: service_healthy
+      capability-policy-service:
+        condition: service_healthy
+      memory-service:
+        condition: service_healthy
+    networks:
+      - deltix-network
+
+  # ---------------------------------------------------------------------------
+  # 2. Agent Compiler Service (:8081) — Deterministic IR Synthesis & Validation
+  # ---------------------------------------------------------------------------
+  agent-compiler-service:
+    container_name: deltix-compiler-service
+    build:
+      context: .
+      dockerfile: backend/agent-compiler-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8081:8081"
+    networks:
+      - deltix-network
+
+  # ---------------------------------------------------------------------------
+  # 3. Agent Runtime Service (:8082) — Go Control Plane & Checkpoint Repository
+  # ---------------------------------------------------------------------------
+  agent-runtime-service:
+    container_name: deltix-runtime-control-plane
+    build:
+      context: .
+      dockerfile: backend/agent-runtime-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      WORKER_BRIDGE_URL: http://agent-runtime-worker:8085
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      agent-runtime-worker:
+        condition: service_healthy
+    networks:
+      - deltix-network
+
+  # ---------------------------------------------------------------------------
+  # 4. Agent Runtime Worker (:8085) — Python LangGraph & Gemini Execution
+  # ---------------------------------------------------------------------------
+  agent-runtime-worker:
+    container_name: deltix-runtime-worker
+    build:
+      context: .
+      dockerfile: backend/agent-runtime-service/worker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MEMORY_SERVICE_URL: http://memory-service:8083
+      CAPABILITY_POLICY_SERVICE_URL: http://capability-policy-service:8084
+    ports:
+      - "127.0.0.1:8085:8085"
+    depends_on:
+      capability-policy-service:
+        condition: service_healthy
+      memory-service:
+        condition: service_healthy
+    networks:
+      - deltix-network
+
+  # ---------------------------------------------------------------------------
+  # 5. Capability & Policy Service (:8084) — Spend Caps & PayPal Adapter
+  # ---------------------------------------------------------------------------
+  capability-policy-service:
+    container_name: deltix-capability-policy-service
+    build:
+      context: .
+      dockerfile: backend/capability-policy-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8084:8084"
+    networks:
+      - deltix-network
+
+  # ---------------------------------------------------------------------------
+  # 6. Memory Service (:8083) — Mem0 Semantic Store & pgvector
+  # ---------------------------------------------------------------------------
+  memory-service:
+    container_name: deltix-memory-service
+    build:
+      context: .
+      dockerfile: backend/memory-service/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8083:8083"
+    networks:
+      - deltix-network
+
+# -----------------------------------------------------------------------------
+# Isolated Private Bridge Network
+# -----------------------------------------------------------------------------
+networks:
+  deltix-network:
+    name: deltix-internal-network
+    driver: bridge

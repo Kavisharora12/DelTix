@@ -69,9 +69,13 @@ func (p *ProxyService) CapabilityPolicyProxy() http.Handler {
 }
 
 // NewJSONReverseProxy builds a standard HTTP reverse proxy that forwards verified tenant/user headers.
-// TODO: Wire this to Compiler (8081), Runtime (8082), and Capability/Policy (8084) routes when ready.
 func (p *ProxyService) NewJSONReverseProxy(target *url.URL, serviceName string) http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(target)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = target.Host
+	}
 	proxy.FlushInterval = 100 * time.Millisecond
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		traceID := middleware.EnsureTraceID(w, r)
@@ -87,9 +91,13 @@ func (p *ProxyService) NewJSONReverseProxy(target *url.URL, serviceName string) 
 }
 
 // NewSSEReverseProxy builds an unbuffered reverse proxy for Server-Sent Events (/v1/runs/{run_id}/stream).
-// TODO(workstream-3): Wire this to Runtime Service (8082) once SSE run streaming is implemented.
 func (p *ProxyService) NewSSEReverseProxy() http.Handler {
 	proxy := httputil.NewSingleHostReverseProxy(p.runtimeURL)
+	originalDirector := proxy.Director
+	proxy.Director = func(req *http.Request) {
+		originalDirector(req)
+		req.Host = p.runtimeURL.Host
+	}
 	// FlushInterval -1 flushes immediately to support real-time SSE chunks without buffering.
 	proxy.FlushInterval = -1
 	proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
@@ -102,5 +110,11 @@ func (p *ProxyService) NewSSEReverseProxy() http.Handler {
 			traceID,
 		)
 	}
-	return proxy
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Disable write deadline so long SSE agent streams are not terminated prematurely by server write timeouts.
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Time{})
+		proxy.ServeHTTP(w, r)
+	})
 }

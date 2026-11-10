@@ -65,8 +65,9 @@ func run(logger *slog.Logger) error {
 	sessionManager := auth.NewRedisSessionManager(redisClient, cfg.GoogleAuth, nil)
 	userStore := handlers.NewPostgresUserStore(pgPool)
 
-	authMiddleware := middleware.NewAuthMiddleware(sessionManager)
+	authMiddleware := middleware.NewAuthMiddlewareWithDevAuth(sessionManager, cfg.AllowDevAuth)
 	rateLimitMiddleware := middleware.NewRateLimitMiddleware(redisClient, cfg.RateLimitPerMinute)
+	corsMiddleware := middleware.NewCORSMiddleware(cfg.CORSOrigins)
 	gatewayHandler := handlers.NewGatewayHandler(sessionManager, userStore, cfg.CookieSecure)
 
 	router := routes.NewRouter(
@@ -81,7 +82,7 @@ func run(logger *slog.Logger) error {
 
 	server := &http.Server{
 		Addr:         ":" + cfg.HTTPPort,
-		Handler:      router,
+		Handler:      corsMiddleware.Handler(router),
 		ReadTimeout:  cfg.ReadTimeout,
 		WriteTimeout: cfg.WriteTimeout,
 	}
