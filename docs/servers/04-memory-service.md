@@ -63,11 +63,11 @@ The Memory Service is built in **Python 3.11 / FastAPI**, interfacing directly w
 
 ## 5. Main Components
 
-1. **Memory Controller (`api/routes.py`):** Exposes typed endpoints for memory addition, semantic search, and deletion.
-2. **Mem0 Adapter (`core/mem0_adapter.py`):** Configures Mem0 client settings, embedding dimensions, and metadata filters.
-3. **Redis Memory Cache (`core/cache.py`):** Caches frequent semantic search results (`memcache:{query_hash}`).
-4. **Tenant Isolator (`core/isolation.py`):** Appends strict namespace prefixes to all Supabase vector queries to guarantee zero data bleed.
-5. **Memory Pruner (`core/pruner.py`):** Scheduled cleanup routine that removes expired or contradicted memory facts from Supabase.
+1. **Memory Controller (`api/handlers.py`, `routes/routes.py`):** Exposes typed endpoints for memory addition, semantic search, deletion, and pruning.
+2. **Mem0 Adapter (`services/memory_service.py`):** Configures Mem0 against Supabase `pgvector` and scopes operations by tenant and agent.
+3. **Redis Memory Cache (`services/memory_service.py`):** Caches semantic search results with tenant-generation invalidation.
+4. **PII Redaction (`services/memory_service.py`):** Removes card numbers, CVVs, and payment credentials before ingestion.
+5. **Memory Pruner (`services/memory_service.py`):** Removes stale memories through the internal maintenance endpoint.
 
 ---
 
@@ -119,10 +119,9 @@ The Memory Service is built in **Python 3.11 / FastAPI**, interfacing directly w
 
 ## 7. Database & Cache Ownership
 
-* **Redis Keys Owned:** `memcache:{tenant_id}:{query_hash}` (TTL: 1 hour).
-* **Supabase Tables Owned:**
-  * `mem0_memories`: Dedicated pgvector collection table.
-    * Columns: `id` (PK), `tenant_id`, `agent_id`, `content` (TEXT), `embedding` (VECTOR(1536)), `metadata` (JSONB), `created_at`, `updated_at`.
+* **Redis Keys Owned:** Tenant-generation keys and `memcache:{tenant_hash}:{agent_hash}:{generation}:{query_hash}` (TTL: 1 hour). A write, delete, purge, or prune advances the tenant generation to invalidate prior results.
+* **Supabase Storage:** Mem0 owns its configured pgvector collection, `deltix_agent_memories`. It is deliberately separate from the shared relational migration, which drops the obsolete `mem0_memories` table.
+  * Each Mem0 operation is scoped by `user_id=tenant_id` and `agent_id`; metadata also records both identifiers. Configure the vector-store connection through `MEMORY_DB_*`.
 
 ---
 
@@ -134,12 +133,19 @@ The Memory Service is built in **Python 3.11 / FastAPI**, interfacing directly w
 | `POST` | `/internal/v1/memory/store` | Ingests conversational turns or facts into Mem0. |
 | `DELETE`| `/internal/v1/memory/{memory_id}`| Invalidates or deletes a specific memory item. |
 | `DELETE`| `/internal/v1/memory/tenant/{tenant_id}` | Complete tenant data purge (GDPR / compliance). |
+| `POST` | `/internal/v1/memory/prune` | Deletes stale memories for the request tenant, optionally limited to an agent (up to 10,000 candidates per request). |
+
+Every endpoint requires `X-Tenant-ID`. Store, retrieve, prune, and tenant-purge requests also carry `tenant_id`; it must match the header. Specific-memory deletion requires `agent_id` as a query parameter and only deletes a memory found in that tenant/agent scope. The header must be set by a trusted internal caller or gateway; it is not itself an authentication mechanism.
+
+### Runtime configuration
+
+Set `MEMORY_DB_HOST`, `MEMORY_DB_PORT` (default `5432`), `MEMORY_DB_USER`, `MEMORY_DB_PASSWORD`, and `MEMORY_DB_NAME` for the Supabase PostgreSQL connection, plus `OPENAI_API_KEY` for the default `text-embedding-3-small` embedder. PostgreSQL SSL defaults to `require` and can be changed with `MEMORY_DB_SSLMODE`. Optional settings include `REDIS_URL`, `MEMORY_SERVICE_PORT` (default `8083`), `MEMORY_COLLECTION_NAME`, `MEMORY_CACHE_TTL_SECONDS`, `MEMORY_DEFAULT_LIMIT`, `MEMORY_MAX_LIMIT`, `MEMORY_SIMILARITY_THRESHOLD`, and `MEMORY_RETENTION_DAYS` (default `90`). Redis may be omitted for local development; cache failures are logged and bypassed without affecting persisted memory operations.
 
 ---
 
 ## 9. Error Handling
 
-* **Embedding API Failure:** If the embedding model provider fails or times out, the service returns an empty memory list with a `MemoryDegraded: true` header rather than failing the agent's run.
+* **Storage or Embedding Failure:** The service reports the dependency failure as an error; callers must decide whether to continue an agent run without memory. It does not convert failed retrieval into a success-shaped empty result.
 * **Empty Match Handling:** If no memories exceed the similarity threshold (default `0.70`), an empty list is returned cleanly.
 
 ---
@@ -154,7 +160,7 @@ The Memory Service is built in **Python 3.11 / FastAPI**, interfacing directly w
 
 ## 11. Dependencies
 
-* **External Frameworks:** Mem0 Python SDK.
+* **External Frameworks:** Mem0 Python SDK (`mem0ai`).
 * **Embedding Models:** OpenAI `text-embedding-3-small` or local embeddings.
 * **Storage & Caching:** Supabase (`pgvector`), Redis 7.
 
@@ -171,17 +177,17 @@ sequenceDiagram
     participant Mem0 as Mem0 Engine
     participant Supabase as Supabase (pgvector)
 
-    Runtime->>MemSvc: POST /internal/v1/memory/retrieve (tenant_id, agent_id, query)
-    MemSvc->>Redis: GET memcache:tenant:query_hash
+    Runtime->>MemSvc: POST /internal/v1/memory/retrieve (X-Tenant-ID, tenant_id, agent_id, query)
+    MemSvc->>Redis: GET tenant/agent/query cache generation
     alt Cache Hit
         Redis-->>MemSvc: Cached Memory Array JSON
         MemSvc-->>Runtime: 200 OK (Cached Context)
     else Cache Miss
-        MemSvc->>Mem0: Search(query, filter={"tenant_id": "acme"})
+        MemSvc->>Mem0: Search(query, filters={"user_id": tenant, "agent_id": agent, "tenant_id": tenant})
         Mem0->>Supabase: Cosine Similarity Search (Embedding, k=3)
         Supabase-->>Mem0: Matched Memory Vectors
         Mem0-->>MemSvc: Extracted Fact Strings
-        MemSvc->>Redis: SETEX memcache:tenant:query_hash 3600 (JSON)
+        MemSvc->>Redis: SETEX scoped top-k result (TTL 3600)
         MemSvc-->>Runtime: 200 OK (List of Relevant Context Memories)
     end
 ```
@@ -194,7 +200,7 @@ sequenceDiagram
 2. **Milestone 2:** Supabase `pgvector` extension setup and connection pooling.
 3. **Milestone 3:** Redis top-k query cache integration.
 4. **Milestone 4:** Tenant isolation layer and embedding generation pipeline.
-5. **Milestone 5:** Automated stale memory decay and invalidation worker.
+5. **Milestone 5:** Scheduled internal caller for the `/prune` maintenance endpoint.
 
 ---
 
