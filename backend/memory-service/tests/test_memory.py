@@ -246,3 +246,60 @@ def test_http_api_stores_and_retrieves_scoped_memories() -> None:
     assert store.status_code == 200
     assert retrieve.status_code == 200
     assert retrieve.json()["memories"][0]["text"] == "Prefers weekly settlement reports"
+
+
+def test_supabase_url_parsing() -> None:
+    from config.config import _parse_database_url
+
+    pooler_url = "postgresql://postgres.myprojectref:SecretPass%23123@aws-0-us-east-1.pooler.supabase.com:6543/postgres?sslmode=require"
+    parsed = _parse_database_url(pooler_url)
+    assert parsed["host"] == "aws-0-us-east-1.pooler.supabase.com"
+    assert parsed["port"] == 6543
+    assert parsed["user"] == "postgres.myprojectref"
+    assert parsed["password"] == "SecretPass#123"
+    assert parsed["name"] == "postgres"
+    assert parsed["sslmode"] == "require"
+
+
+def test_gemini_config_and_validation() -> None:
+    from config.config import MemoryConfig
+
+    cfg = MemoryConfig(
+        database_host="aws-0-us-east-1.pooler.supabase.com",
+        database_password="secretpassword",
+        gemini_api_key="AIzaSyDummyGeminiKey",
+        embedding_provider="gemini",
+        embedding_model="models/text-embedding-004",
+        embedding_dimensions=768,
+        llm_model="gemini-2.0-flash",
+    )
+    cfg.validate_storage()
+    assert cfg.embedding_dimensions == 768
+    assert cfg.embedding_model == "models/text-embedding-004"
+    assert cfg.embedding_provider == "gemini"
+
+    invalid_cfg = MemoryConfig(
+        database_host="aws-0-us-east-1.pooler.supabase.com",
+        database_password="secretpassword",
+        gemini_api_key="",
+        openai_api_key="",
+    )
+    try:
+        invalid_cfg.validate_storage()
+        assert False, "Should have raised ValueError for missing embedding key"
+    except ValueError as exc:
+        assert "GEMINI_API_KEY" in str(exc)
+
+
+def test_mem0_cloud_config_validation() -> None:
+    from config.config import MemoryConfig
+
+    # With Mem0 Cloud API key, external database is not required
+    cfg = MemoryConfig(
+        mem0_api_key="m0-test-key-12345",
+    )
+    # validate_storage should succeed
+    cfg.validate_storage()
+    assert cfg.mem0_api_key == "m0-test-key-12345"
+
+

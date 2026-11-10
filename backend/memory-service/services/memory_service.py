@@ -122,18 +122,48 @@ class MemoryService:
         except (TypeError, ValueError) as exc:
             raise MemoryConfigurationError(str(exc)) from exc
 
-        from mem0 import Memory
+        if config.mem0_api_key:
+            from mem0 import MemoryClient
 
-        memory_client = Memory.from_config(
-            {
-                "version": "v1.1",
-                "embedder": {
+            memory_client = MemoryClient(api_key=config.mem0_api_key)
+        else:
+            from mem0 import Memory
+
+            if config.embedding_provider == "gemini":
+                embedder_config = {
+                    "provider": "gemini",
+                    "config": {
+                        "model": config.embedding_model,
+                        "api_key": config.gemini_api_key,
+                    },
+                }
+                llm_config = {
+                    "provider": "gemini",
+                    "config": {
+                        "model": config.llm_model,
+                        "api_key": config.gemini_api_key,
+                    },
+                }
+            else:
+                embedder_config = {
                     "provider": "openai",
                     "config": {
                         "model": config.embedding_model,
                         "api_key": config.openai_api_key,
                     },
-                },
+                }
+                llm_config = {
+                    "provider": "openai",
+                    "config": {
+                        "model": config.llm_model,
+                        "api_key": config.openai_api_key,
+                    },
+                }
+
+            mem0_config = {
+                "version": "v1.1",
+                "embedder": embedder_config,
+                "llm": llm_config,
                 "vector_store": {
                     "provider": "pgvector",
                     "config": {
@@ -148,7 +178,8 @@ class MemoryService:
                     },
                 },
             }
-        )
+
+            memory_client = Memory.from_config(mem0_config)
         cache_client = None
         if config.redis_url:
             from redis import Redis
@@ -194,16 +225,24 @@ class MemoryService:
         if cached is not None:
             return [MemoryItem.model_validate(item) for item in cached]
 
-        result = self._memory.search(
-            query,
-            filters={
-                "user_id": tenant_id,
-                "agent_id": agent_id,
-                "tenant_id": tenant_id,
-            },
-            top_k=requested_limit,
-            threshold=self._similarity_threshold,
-        )
+        try:
+            result = self._memory.search(
+                query,
+                filters={
+                    "user_id": tenant_id,
+                    "agent_id": agent_id,
+                    "tenant_id": tenant_id,
+                },
+                top_k=requested_limit,
+                threshold=self._similarity_threshold,
+            )
+        except TypeError:
+            result = self._memory.search(
+                query,
+                user_id=tenant_id,
+                agent_id=agent_id,
+                limit=requested_limit,
+            )
         memories: list[MemoryItem] = []
         for raw in _memories_from_result(result):
             item = _to_memory_item(raw)

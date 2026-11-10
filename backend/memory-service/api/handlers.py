@@ -19,7 +19,7 @@ from models.memory_models import (
 )
 from services.memory_service import MemoryConfigurationError, MemoryService
 
-router = APIRouter(prefix="/internal/v1/memory", tags=["memory"])
+router = APIRouter(tags=["memory"])
 
 
 @lru_cache(maxsize=1)
@@ -43,6 +43,7 @@ def _validate_tenant_header(request_tenant: str, header_tenant: str) -> None:
 
 
 @router.post("/retrieve", response_model=MemoryListResponse)
+@router.post("/search", response_model=MemoryListResponse)
 def retrieve_memories(
     request: RetrieveMemoryRequest,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID", min_length=1),
@@ -62,6 +63,7 @@ def retrieve_memories(
 
 
 @router.post("/store", response_model=StoreMemoryResponse)
+@router.post("/add", response_model=StoreMemoryResponse)
 def store_memories(
     request: StoreMemoryRequest,
     x_tenant_id: str = Header(..., alias="X-Tenant-ID", min_length=1),

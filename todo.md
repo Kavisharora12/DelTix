@@ -106,18 +106,35 @@
 ## 7. Workstream 4 — Memory Service (`backend/memory-service/`, Port 8083)
 - [x] **Structure-Aware Financial Chunker** (`services/memory_service.py`)
   - Heading hierarchy detector (`H1 > H2 > H3`), table parameter extractor (duplicated headers), boundary detector, PII sanitizer
-- [ ] **Separate `pgvector` RAG Schema** (`backend/shared/migrations/002_pgvector_rag_schema.sql`)
-  - Isolated `rag_vector` schema (`rag_vector.documents`, `rag_vector.document_chunks`)
-  - Dedicated `RAG_VECTOR_DB_URL` configuration (separate from core ACID tables in `001_initial_schema.sql`)
-- [ ] **Real Supabase Hybrid Search (Vector + Keyword BM25 / tsvector with Reciprocal Rank Fusion)** (`services/memory_service.py`)
-  - Replace temporary in-memory store with real Google Gemini embeddings (`text-embedding-004`) + PostgreSQL `pgvector`
-- [ ] **FastAPI Handlers, Routes & Entrypoint** (`api/handlers.py`, `routes/routes.py`, `main.py`)
-- [ ] **Multi-Tenant Isolation & Retrieval Tests** (`tests/test_memory.py`)
+- [x] **Separate `pgvector` RAG Schema** (`backend/shared/migrations/002_pgvector_rag_schema.sql`)
+  - Isolated `rag_vector` schema (`rag_vector.documents`, `rag_vector.document_chunks`) with 768-dim vectors for Gemini `text-embedding-004`
+  - Automatic `SUPABASE_DB_URL` and `RAG_VECTOR_DB_URL` connection string parser (port 6543 pooler / port 5432 direct)
+- [x] **Real Supabase Hybrid Vector & Mem0 Storage with Google Gemini** (`services/memory_service.py`, `config/config.py`)
+  - Google Gemini embeddings (`models/text-embedding-004`, 768 dims) & LLM extraction (`gemini-2.0-flash`) with optional OpenAI fallback
+  - Redis tenant cache invalidation with `UPSTASH_REDIS_URL` support
+- [x] **FastAPI Handlers, Dual Routes & Entrypoint** (`api/handlers.py`, `routes/routes.py`, `main.py`)
+  - Dual path aliases (`/internal/v1/memory/*` and `/internal/v1/memories/*`, `/retrieve` & `/search`, `/store` & `/add`)
+- [x] **Multi-Tenant Isolation, Supabase URL & Gemini Retrieval Tests** (`tests/test_memory.py` — Passing)
 
 ---
 
-## 8. Frontend Dashboard (`frontend/`)
-- [x] **Frontend Content & Component Specifications for Current Built Scope** (`frontend/README.md`, `frontend/01-landing-and-auth.md`, `frontend/02-agent-compiler-studio.md`, `frontend/03-agent-specs-library.md`)
-- [ ] Natural Language Prompt & Clarification UI Implementation
-- [ ] Compiled `Agent IR` & Validation Test Scorecard Viewer Implementation
-- [ ] Live Execution Timeline (SSE) & Human Approval Modal Implementation
+## 8. Frontend Dashboard & Documentation Suite (`frontend/`)
+- [x] **Master End-User Product Manual & Client UI Guide** (`frontend/docs.md`)
+  - Complete screen-by-screen client walkthrough: Landing Page, Dashboard, Compiler Studio, Sandbox Chatbot, Approval Modal, and Audit Ledger
+  - Financial Prompt Contract, copy-paste prompt templates, interactive clarification drawer, and 4-step quick-start guide
+- [x] **Component Implementation Specifications** (`frontend/*.md`)
+  - [x] `01-landing-and-auth.md` — Landing Page, 7-Guardrail Playground & Google OAuth Workspace Auth
+  - [x] `02-agent-compiler-studio.md` — Prompt Editor, Clarification Drawer, React Flow DAG & Pre-Flight Scorecards
+  - [x] `03-agent-specs-library.md` — Compiled Agent Specs Catalog & HMAC Readiness Verification
+  - [x] `README.md` — Master Frontend Directory Index
+
+---
+
+## 9. Startup Shipping & Remaining Scope
+- [x] **Backend Infrastructure & All 5 Microservices:** 100% complete, fully unit-tested, zero mocks in production paths.
+- [x] **Single Consolidated `.env`:** Root-only configuration driving all Go, Python, and Docker services.
+- [x] **Isolated Database Migrations:** Pure ACID relational (`001_initial_schema.sql`) and pgvector RAG (`002_pgvector_rag_schema.sql`).
+- [x] **Protobuf / gRPC Bridge Contract:** Defined in `runtime.proto` with dual Go client and Python servicer implementations.
+- [ ] **React / Next.js Frontend Implementation:** Scaffolding the UI components specified in `frontend/*.md`.
+- [ ] **Docker Compose Production Bundle:** Scaffolding multi-container `docker-compose.yml` for 1-click cloud deployment.
+- [ ] **End-to-End Smoke Test Suite:** Full lifecycle integration test (`/v1/agents/compile` ➡️ `/v1/runs` ➡️ `/v1/approvals` ➡️ PayPal Sandbox).

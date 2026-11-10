@@ -15,6 +15,8 @@ import (
 
 	runtimemodels "github.com/deltix/agent-runtime-service/models"
 	sharedmodels "github.com/deltix/shared/models"
+	runtimev1 "github.com/deltix/shared/proto/runtimev1"
+	"google.golang.org/grpc"
 )
 
 // WorkerBridgeClient dispatches compiled AgentIR graphs to the Python LangGraph Worker (:8085).
@@ -73,6 +75,81 @@ func (c *HTTPWorkerBridgeClient) ExecuteGraph(
 		return runtimemodels.WorkerExecuteResponse{}, fmt.Errorf("decode worker execute response: %w", err)
 	}
 	return out, nil
+}
+
+type GRPCWorkerBridgeClient struct {
+	client runtimev1.AgentExecutionServiceClient
+}
+
+func NewGRPCWorkerBridgeClient(conn grpc.ClientConnInterface) *GRPCWorkerBridgeClient {
+	return &GRPCWorkerBridgeClient{
+		client: runtimev1.NewAgentExecutionServiceClient(conn),
+	}
+}
+
+func (c *GRPCWorkerBridgeClient) ExecuteGraph(
+	ctx context.Context,
+	req runtimemodels.WorkerExecuteRequest,
+) (runtimemodels.WorkerExecuteResponse, error) {
+	agentIRBytes, err := json.Marshal(req.AgentIR)
+	if err != nil {
+		return runtimemodels.WorkerExecuteResponse{}, fmt.Errorf("marshal agent_ir: %w", err)
+	}
+	inputsBytes, _ := json.Marshal(req.Inputs)
+	priorStateBytes, _ := json.Marshal(req.PriorState)
+
+	protoReq := &runtimev1.ExecuteGraphRequest{
+		RunId:            req.RunID,
+		TenantId:         req.TenantID,
+		AgentIrJson:      string(agentIRBytes),
+		InputsJson:       string(inputsBytes),
+		PriorStateJson:   string(priorStateBytes),
+		ResumeFromNodeId: req.ResumeFromNodeID,
+		ApprovalStatus:   req.ApprovalStatus,
+		ApprovalToken:    req.ApprovalToken,
+	}
+
+	protoResp, err := c.client.ExecuteGraph(ctx, protoReq)
+	if err != nil {
+		return runtimemodels.WorkerExecuteResponse{}, fmt.Errorf("grpc execute graph: %w", err)
+	}
+
+	var variables map[string]interface{}
+	if protoResp.VariablesJson != "" {
+		_ = json.Unmarshal([]byte(protoResp.VariablesJson), &variables)
+	}
+
+	checkpoints := make([]runtimemodels.WorkerCheckpointItem, 0, len(protoResp.Checkpoints))
+	for _, cp := range protoResp.Checkpoints {
+		var nodeInput, nodeOutput map[string]interface{}
+		_ = json.Unmarshal([]byte(cp.NodeInputJson), &nodeInput)
+		_ = json.Unmarshal([]byte(cp.NodeOutputJson), &nodeOutput)
+		checkpoints = append(checkpoints, runtimemodels.WorkerCheckpointItem{
+			StepIndex:  int(cp.StepIndex),
+			NodeID:     cp.NodeId,
+			NodeType:   sharedmodels.NodeType(cp.NodeType),
+			NodeInput:  nodeInput,
+			NodeOutput: nodeOutput,
+			Status:     cp.Status,
+			DurationMs: cp.DurationMs,
+		})
+	}
+
+	return runtimemodels.WorkerExecuteResponse{
+		RunID:           protoResp.RunId,
+		RunStatus:       protoResp.RunStatus,
+		StepIndex:       int(protoResp.StepIndex),
+		CurrentNodeID:   protoResp.CurrentNodeId,
+		CumulativeSpend: protoResp.CumulativeSpend,
+		Variables:       variables,
+		MemoryDegraded:  protoResp.MemoryDegraded,
+		PauseRequested:  protoResp.PauseRequested,
+		PausedAtNodeID:  protoResp.PausedAtNodeId,
+		PauseSummary:    protoResp.PauseSummary,
+		ErrorMessage:    protoResp.ErrorMessage,
+		Checkpoints:     checkpoints,
+		FinalState:      json.RawMessage(protoResp.FinalStateJson),
+	}, nil
 }
 
 type RuntimeService struct {

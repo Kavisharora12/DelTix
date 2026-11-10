@@ -199,3 +199,175 @@ def _to_worker_response(state: dict[str, Any]) -> WorkerExecutionResponse:
         state_snapshot=snapshot,
         final_state=snapshot,
     )
+
+
+import asyncio
+from concurrent import futures
+import grpc
+
+try:
+    from api import runtime_pb2, runtime_pb2_grpc
+except ImportError:
+    import runtime_pb2, runtime_pb2_grpc  # type: ignore[no-redef]
+
+
+class AgentExecutionGRPCServicer(runtime_pb2_grpc.AgentExecutionServiceServicer):
+    """gRPC implementation of the AgentExecutionService protocol."""
+
+    def __init__(self, engine: DynamicLangGraphEngine, cfg: WorkerConfig | None = None) -> None:
+        self.engine = engine
+        self.cfg = cfg or load_worker_config_from_env()
+
+    def ExecuteGraph(
+        self, request: runtime_pb2.ExecuteGraphRequest, context: grpc.ServicerContext
+    ) -> runtime_pb2.ExecuteGraphResponse:
+        try:
+            agent_ir = json.loads(request.agent_ir_json)
+            inputs = json.loads(request.inputs_json) if request.inputs_json else {}
+            prior_state = json.loads(request.prior_state_json) if request.prior_state_json else None
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                final_state = loop.run_until_complete(
+                    self.engine.execute_or_resume(
+                        agent_ir=agent_ir,
+                        run_id=request.run_id,
+                        tenant_id=request.tenant_id,
+                        inputs=inputs,
+                        prior_state=prior_state,
+                        resume_from_node_id=request.resume_from_node_id or None,
+                        approval_status=request.approval_status,
+                        approval_token=request.approval_token,
+                    )
+                )
+            finally:
+                loop.close()
+
+            return _to_grpc_response(final_state)
+        except Exception as exc:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(exc))
+            return runtime_pb2.ExecuteGraphResponse(
+                run_id=request.run_id,
+                tenant_id=request.tenant_id,
+                run_status="FAILED",
+                error_message=str(exc),
+            )
+
+    def ResumeExecution(
+        self, request: runtime_pb2.ResumeExecutionRequest, context: grpc.ServicerContext
+    ) -> runtime_pb2.ExecuteGraphResponse:
+        try:
+            agent_ir = json.loads(request.agent_ir_json)
+            prior_state = json.loads(request.prior_state_json) if request.prior_state_json else {}
+
+            if request.approval_status == "REJECTED":
+                return runtime_pb2.ExecuteGraphResponse(
+                    run_id=request.run_id,
+                    tenant_id=request.tenant_id,
+                    run_status="REJECTED",
+                    step_index=int(prior_state.get("step_index", 0)),
+                    current_node_id=request.resume_from_node_id,
+                    cumulative_spend=float(prior_state.get("cumulative_spend", 0.0)),
+                    variables_json=json.dumps(dict(prior_state.get("variables") or {})),
+                    memory_degraded=bool(prior_state.get("memory_degraded", False)),
+                    error_message="Operator rejected human approval request.",
+                    state_snapshot_json=json.dumps(prior_state),
+                    final_state_json=json.dumps(prior_state),
+                )
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                final_state = loop.run_until_complete(
+                    self.engine.execute_or_resume(
+                        agent_ir=agent_ir,
+                        run_id=request.run_id,
+                        tenant_id=request.tenant_id,
+                        inputs=dict(prior_state.get("inputs") or {}),
+                        prior_state=prior_state,
+                        resume_from_node_id=request.resume_from_node_id,
+                        approval_status=request.approval_status,
+                        approval_token=request.approval_token,
+                    )
+                )
+            finally:
+                loop.close()
+
+            return _to_grpc_response(final_state)
+        except Exception as exc:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(exc))
+            return runtime_pb2.ExecuteGraphResponse(
+                run_id=request.run_id,
+                tenant_id=request.tenant_id,
+                run_status="FAILED",
+                error_message=str(exc),
+            )
+
+    def HealthCheck(
+        self, request: runtime_pb2.HealthCheckRequest, context: grpc.ServicerContext
+    ) -> runtime_pb2.HealthCheckResponse:
+        return runtime_pb2.HealthCheckResponse(
+            status="ok",
+            version="1.0.0",
+            paypal_configured=bool(
+                self.cfg.paypal_client_id and self.cfg.paypal_client_secret
+            ),
+        )
+
+
+def _to_grpc_response(state: dict[str, Any]) -> runtime_pb2.ExecuteGraphResponse:
+    snapshot = {
+        "step_index": state["step_index"],
+        "current_node_id": state["current_node_id"],
+        "cumulative_spend": state["cumulative_spend"],
+        "inputs": state["inputs"],
+        "variables": state["variables"],
+        "memory_context": state["memory_context"],
+        "memory_degraded": state["memory_degraded"],
+    }
+    checkpoints = []
+    for cp in state.get("checkpoints", []):
+        checkpoints.append(
+            runtime_pb2.CheckpointItem(
+                step_index=cp.get("step_index", 0),
+                node_id=cp.get("node_id", ""),
+                node_type=str(cp.get("node_type", "")),
+                node_input_json=json.dumps(cp.get("node_input", {})),
+                node_output_json=json.dumps(cp.get("node_output", {})),
+                status=cp.get("status", ""),
+                duration_ms=int(cp.get("duration_ms", 0)),
+            )
+        )
+    return runtime_pb2.ExecuteGraphResponse(
+        run_id=state["run_id"],
+        tenant_id=state["tenant_id"],
+        run_status=state["run_status"],
+        step_index=state["step_index"],
+        current_node_id=state["current_node_id"],
+        pause_requested=bool(state.get("pause_requested", False)),
+        paused_at_node_id=state.get("paused_at_node_id", ""),
+        pause_summary=state.get("pause_summary", ""),
+        cumulative_spend=float(state.get("cumulative_spend", 0.0)),
+        variables_json=json.dumps(state.get("variables", {})),
+        memory_degraded=bool(state.get("memory_degraded", False)),
+        error_message=state.get("error_message", ""),
+        checkpoints=checkpoints,
+        state_snapshot_json=json.dumps(snapshot),
+        final_state_json=json.dumps(snapshot),
+    )
+
+
+def create_grpc_server(
+    engine: DynamicLangGraphEngine,
+    cfg: WorkerConfig | None = None,
+    max_workers: int = 10,
+) -> grpc.Server:
+    """Builds and returns a configured gRPC server instance."""
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=max_workers))
+    servicer = AgentExecutionGRPCServicer(engine=engine, cfg=cfg)
+    runtime_pb2_grpc.add_AgentExecutionServiceServicer_to_server(servicer, server)
+    return server
+

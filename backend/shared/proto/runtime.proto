@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package deltix.runtime.v1;
+
+option go_package = "github.com/deltix/shared/proto/runtimev1;runtimev1";
+
+// AgentExecutionService defines the binary high-speed bridge between
+// the Go Runtime Control Plane (:8082) and the Python LangGraph Worker (:8085).
+service AgentExecutionService {
+  // Executes or resumes a compiled Agent IR graph run
+  rpc ExecuteGraph (ExecuteGraphRequest) returns (ExecuteGraphResponse);
+
+  // Resumes an interrupted run with an approved decision and HMAC token
+  rpc ResumeExecution (ResumeExecutionRequest) returns (ExecuteGraphResponse);
+
+  // Callback from worker to control plane for external tool capability dispatch
+  rpc DispatchTool (ToolRequest) returns (ToolResponse);
+
+  // Liveness and readiness probe for the worker process
+  rpc HealthCheck (HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message ExecuteGraphRequest {
+  string run_id = 1;
+  string tenant_id = 2;
+  string agent_ir_json = 3;
+  string inputs_json = 4;
+  string prior_state_json = 5;
+  string resume_from_node_id = 6;
+  string approval_status = 7;
+  string approval_token = 8;
+}
+
+message ResumeExecutionRequest {
+  string run_id = 1;
+  string tenant_id = 2;
+  string agent_ir_json = 3;
+  string prior_state_json = 4;
+  string resume_from_node_id = 5;
+  string approval_status = 6;
+  string approval_token = 7;
+}
+
+message CheckpointItem {
+  int32 step_index = 1;
+  string node_id = 2;
+  string node_type = 3;
+  string node_input_json = 4;
+  string node_output_json = 5;
+  string status = 6;
+  int64 duration_ms = 7;
+}
+
+message ExecuteGraphResponse {
+  string run_id = 1;
+  string tenant_id = 2;
+  string run_status = 3;
+  int32 step_index = 4;
+  string current_node_id = 5;
+  bool pause_requested = 6;
+  string paused_at_node_id = 7;
+  string pause_summary = 8;
+  double cumulative_spend = 9;
+  string variables_json = 10;
+  bool memory_degraded = 11;
+  string error_message = 12;
+  repeated CheckpointItem checkpoints = 13;
+  string state_snapshot_json = 14;
+  string final_state_json = 15;
+}
+
+message ToolRequest {
+  string run_id = 1;
+  string tenant_id = 2;
+  string capability_id = 3;
+  string parameters_json = 4;
+}
+
+message ToolResponse {
+  bool success = 1;
+  string result_json = 2;
+  string error_message = 3;
+}
+
+message HealthCheckRequest {
+  string service_name = 1;
+}
+
+message HealthCheckResponse {
+  string status = 1;
+  string version = 2;
+  bool paypal_configured = 3;
+}
