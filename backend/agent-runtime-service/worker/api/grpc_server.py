@@ -117,6 +117,10 @@ def create_worker_app(
             ),
             "paypal_sandbox": resolved_cfg.paypal_sandbox,
             "langsmith_tracing": resolved_cfg.langchain_tracing_v2,
+            "langsmith_project": resolved_cfg.langchain_project,
+            "langsmith_configured": bool(
+                resolved_cfg.langchain_api_key or os.getenv("LANGCHAIN_API_KEY")
+            ),
         }
 
     @app.post("/internal/v1/worker/execute", response_model=WorkerExecutionResponse)

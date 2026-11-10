@@ -56,6 +56,8 @@ class WorkerConfig:
     paypal_sandbox: bool = True
     langchain_tracing_v2: bool = False
     langchain_project: str = "deltix-agent-runtime"
+    langchain_api_key: str = ""
+    langchain_endpoint: str = ""
     memory_service_url: str = "http://localhost:8083"
     capability_policy_service_url: str = "http://localhost:8084"
     http_timeout_seconds: float = 15.0
@@ -80,11 +82,23 @@ def load_worker_config_from_env() -> WorkerConfig:
     paypal_env = os.getenv("PAYPAL_ENVIRONMENT", "SANDBOX").strip().upper()
     paypal_sandbox = paypal_env != "PRODUCTION" and paypal_env != "LIVE"
 
-    tracing_enabled = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
+    langchain_api_key = (
+        os.getenv("LANGCHAIN_API_KEY", "").strip()
+        or os.getenv("LANGSMITH_API_KEY", "").strip()
+    )
+    langchain_endpoint = os.getenv("LANGCHAIN_ENDPOINT", "").strip()
+    tracing_env = os.getenv("LANGCHAIN_TRACING_V2", "").strip().lower()
+    tracing_enabled = tracing_env == "true" or (bool(langchain_api_key) and tracing_env != "false")
     project_name = os.getenv("LANGCHAIN_PROJECT", "deltix-agent-runtime").strip()
+
     if tracing_enabled:
         os.environ["LANGCHAIN_TRACING_V2"] = "true"
         os.environ["LANGCHAIN_PROJECT"] = project_name
+        if langchain_api_key:
+            os.environ["LANGCHAIN_API_KEY"] = langchain_api_key
+            os.environ["LANGSMITH_API_KEY"] = langchain_api_key
+        if langchain_endpoint:
+            os.environ["LANGCHAIN_ENDPOINT"] = langchain_endpoint
 
     return WorkerConfig(
         http_port=int(os.getenv("WORKER_HTTP_PORT", "8085")),
@@ -97,6 +111,8 @@ def load_worker_config_from_env() -> WorkerConfig:
         paypal_sandbox=paypal_sandbox,
         langchain_tracing_v2=tracing_enabled,
         langchain_project=project_name,
+        langchain_api_key=langchain_api_key,
+        langchain_endpoint=langchain_endpoint,
         memory_service_url=os.getenv("MEMORY_SERVICE_URL", "http://localhost:8083").rstrip("/"),
         capability_policy_service_url=os.getenv(
             "CAPABILITY_POLICY_SERVICE_URL", "http://localhost:8084"

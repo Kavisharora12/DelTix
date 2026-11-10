@@ -530,6 +530,34 @@ class TestDynamicLangGraphWorker(unittest.TestCase):
         self.assertEqual(captured_actions["actions"], {"orders": {"create": True}})
         self.assertTrue(captured_actions["sandbox"])
 
+    def test_langsmith_config_loading_and_env_propagation(self) -> None:
+        import os
+        from config.config import load_worker_config_from_env
+
+        old_env = {
+            "LANGCHAIN_TRACING_V2": os.environ.get("LANGCHAIN_TRACING_V2"),
+            "LANGCHAIN_API_KEY": os.environ.get("LANGCHAIN_API_KEY"),
+            "LANGCHAIN_PROJECT": os.environ.get("LANGCHAIN_PROJECT"),
+            "LANGCHAIN_ENDPOINT": os.environ.get("LANGCHAIN_ENDPOINT"),
+        }
+        try:
+            os.environ["LANGCHAIN_TRACING_V2"] = "true"
+            os.environ["LANGCHAIN_API_KEY"] = "lsv2_pt_test_key_12345"
+            os.environ["LANGCHAIN_PROJECT"] = "test-project"
+            cfg = load_worker_config_from_env()
+            self.assertTrue(cfg.langchain_tracing_v2)
+            self.assertEqual(cfg.langchain_api_key, "lsv2_pt_test_key_12345")
+            self.assertEqual(cfg.langchain_project, "test-project")
+            self.assertEqual(os.environ["LANGCHAIN_API_KEY"], "lsv2_pt_test_key_12345")
+            self.assertEqual(os.environ["LANGSMITH_API_KEY"], "lsv2_pt_test_key_12345")
+        finally:
+            for k, v in old_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            os.environ.pop("LANGSMITH_API_KEY", None)
+
 
 if __name__ == "__main__":
     unittest.main()
