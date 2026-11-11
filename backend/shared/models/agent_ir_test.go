@@ -134,3 +134,4 @@ func TestAgentIR_Validate(t *testing.T) {
 		t.Errorf("expected error for conflicting read-only policy with budget, got nil")
 	}
 }
+
