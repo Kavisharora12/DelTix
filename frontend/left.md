@@ -8,12 +8,12 @@
 ## Screen-by-Screen Gap Analysis (Against `docs.md`)
 
 ### Screen 1: Public Landing Page (`/`) — Mostly Built (Differences from `docs.md`)
-- **Implemented:** [src/app/page.tsx](./src/app/page.tsx), [src/components/animation/stickman-story.tsx](./src/components/animation/stickman-story.tsx), [src/components/animation/interactive-simulator.tsx](./src/components/animation/interactive-simulator.tsx), plus separate static HTML site [landing/](./landing/).
+- **Implemented:** [src/app/page.tsx](./src/app/page.tsx), [src/components/animation/stickman-story.tsx](./src/components/animation/stickman-story.tsx), [src/components/animation/interactive-simulator.tsx](./src/components/animation/interactive-simulator.tsx) *(legacy static `landing/` folder removed)*.
 - **Left vs `docs.md`:**
   - **Interactive Prompt Playground (try-before-login prompt pills + guardrail preview):** Replaced by a numeric invoice-amount / spend-cap simulator (`InteractiveSimulator`); there is no plain-English sample prompt input on `/`.
-  - **Top Navigation Links (`Platform`, `Guardrails`, `Pricing`, `Docs`) & `Sign In with Google` CTA on `/`:** Next.js `LandingPage` only shows `Direct Console` and `Interactive Game Tour` — there is **no Google Sign-In button or `/login` route** in the Next.js app (`src/app/`). The working Google OAuth UI (`Sign in`, `Get started`, work email form passing `?tenant_id=...&redirect=true`) only exists in the separate static HTML folder ([landing/index.html](./landing/index.html), [landing/app.js](./landing/app.js)), which is excluded from the Docker image and not served by Next.js on `:3000`.
+  - **Top Navigation Links (`Platform`, `Guardrails`, `Pricing`, `Docs`) & `Sign In with Google` CTA on `/`:** Next.js `LandingPage` only shows `Direct Console` and `Interactive Game Tour` — there is **no Google Sign-In button or `/login` route** anywhere in the Next.js app (`src/app/`).
   - **Broken `Sign In` Link & Auth Redirect (`src/components/shell/topbar.tsx:153`):** The console `TopBar` links to `${API_BASE}/v1/auth/google/login` without `?tenant_id=...&redirect=true` (`backend/api-gateway/handlers/gateway_handler.go:114-129` returns `400 MISSING_TENANT_ID`), and `HandleGoogleCallback` returns raw JSON instead of redirecting back to the frontend console. Furthermore, `src/lib/api.ts:16` automatically attaches `"dev_token_deltix"` (`ten_dev_workspace`), masking Google login completely in dev mode.
-  - **`Book Enterprise Demo` Modal:** Not implemented in Next.js `/` (only `mailto:` config in `landing/config.js`).
+  - **`Book Enterprise Demo` Modal:** Not implemented in Next.js `/`.
 
 ---
 
@@ -71,7 +71,7 @@
 ## Cross-Cutting Items & Why Fake / Hardcoded Data Appears in the UI
 
 1. **Google Auth Page / Login Flow Missing in Next.js Console:**
-   - There is no `/login` or `/auth` route in `frontend/src/app/`. Working Google OAuth links only live in static `frontend/landing/` ([landing/app.js:19](./landing/app.js)).
+   - There is no `/login`, `/auth`, or Sign-In button on `/` in `frontend/src/app/`.
    - Console auto-authenticates via hardcoded `tenantId: "ten_dev_workspace"` (`src/lib/store.ts:54`) + fallback `Bearer dev_token_deltix` (`src/lib/api.ts:16`).
    - Console `TopBar` `Sign In` button omits `?tenant_id=...&redirect=true`, hitting `400 MISSING_TENANT_ID`.
 2. **Where Real Data Ends & Fake / Hardcoded Data Begins:**
