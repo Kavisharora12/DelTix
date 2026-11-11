@@ -36,8 +36,8 @@ export function RunsTable({ runs }: RunsTableProps) {
   const [selectedRowIndex, setSelectedRowIndex] = useState<number>(0);
   const [peekRun, setPeekRun] = useState<RunItem | null>(null);
 
-  const handleTriggerRun = () => {
-    const newRun = createRunFromAgent(agents[0]?.id || "agent_payables");
+  const handleTriggerRun = async () => {
+    const newRun = await createRunFromAgent(agents[0]?.id || "agent_payables");
     setSelectedRunId(newRun.id);
     router.push(`/runs/${newRun.id}`);
   };
