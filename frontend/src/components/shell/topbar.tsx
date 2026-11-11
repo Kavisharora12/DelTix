@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Search, Sun, Moon, ChevronRight, User, HelpCircle, Gamepad2, Keyboard } from "lucide-react";
+import { Search, Sun, Moon, ChevronRight, User, HelpCircle, Gamepad2, Keyboard, Bell } from "lucide-react";
 import { EnvPill } from "@/components/ui/env-pill";
 import { useDelTixStore } from "@/lib/store";
 import { useTourStore } from "@/lib/tour-store";
@@ -21,6 +21,8 @@ export function TopBar({ onOpenShortcuts }: TopBarProps = {}) {
   const [cmdOpen, setCmdOpen] = useState(false);
   const [isLight, setIsLight] = useState(false);
   const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
+
+  const pendingApprovalsCount = runs.filter((r) => r.status === "PAUSED_FOR_APPROVAL").length;
 
   useEffect(() => {
     api.getCurrentSession()
@@ -47,7 +49,11 @@ export function TopBar({ onOpenShortcuts }: TopBarProps = {}) {
 
   // Generate breadcrumbs from route
   const pathSegments = pathname.split("/").filter(Boolean);
-  let breadcrumbTitle = "Runs";
+  let breadcrumbTitle = "Dashboard";
+  if (pathSegments[0] === "dashboard") breadcrumbTitle = "Dashboard";
+  if (pathSegments[0] === "studio") breadcrumbTitle = "Compiler Studio";
+  if (pathSegments[0] === "sandbox") breadcrumbTitle = "Live Sandbox";
+  if (pathSegments[0] === "runs") breadcrumbTitle = "Runs";
   if (pathSegments[0] === "approvals") breadcrumbTitle = "Approvals";
   if (pathSegments[0] === "agents") breadcrumbTitle = "Agents & Studio";
   if (pathSegments[0] === "policies") breadcrumbTitle = "Policies & Caps";
@@ -80,6 +86,18 @@ export function TopBar({ onOpenShortcuts }: TopBarProps = {}) {
 
         {/* Controls Right */}
         <div className="flex items-center gap-3">
+          {/* Pending Approvals Bell Alert */}
+          {pendingApprovalsCount > 0 && (
+            <Link
+              href="/approvals"
+              className="h-7 px-2.5 rounded-btn bg-amber-3 border border-amber-6 text-amber-11 hover:bg-amber-4 flex items-center gap-1.5 transition-colors text-ui-sm font-medium"
+              title={`${pendingApprovalsCount} approval(s) waiting for operator decision`}
+            >
+              <Bell className="h-3.5 w-3.5 text-amber-11" />
+              <span>{pendingApprovalsCount} Approvals</span>
+            </Link>
+          )}
+
           {/* Interactive Game Tour Guide Button */}
           <button
             type="button"

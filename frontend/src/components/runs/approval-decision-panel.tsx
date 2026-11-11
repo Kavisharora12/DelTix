@@ -29,6 +29,7 @@ export function ApprovalDecisionPanel({ run, className }: ApprovalDecisionPanelP
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
+  const [operatorNote, setOperatorNote] = useState("Verified customer evidence & compliance policy against transaction");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [signedToken, setSignedToken] = useState<string | null>(details?.signedToken || null);
   const [copied, setCopied] = useState(false);
@@ -40,7 +41,7 @@ export function ApprovalDecisionPanel({ run, className }: ApprovalDecisionPanelP
   const handleApprove = async () => {
     setIsSubmitting(true);
     try {
-      const res = await approveRun(run.id, "Verified against vendor PO & invoices");
+      const res = await approveRun(run.id, operatorNote.trim() || "Verified against vendor PO & invoices");
       setSignedToken(res.signedToken);
       setConfirmOpen(false);
     } finally {
@@ -222,6 +223,19 @@ export function ApprovalDecisionPanel({ run, className }: ApprovalDecisionPanelP
               <div>TARGET_ACCOUNT: {details.recipientAccount}</div>
               <div>IDEMPOTENCY_MODE: ENFORCE_PRE_RECORDED</div>
               <div>AUTH_MECHANISM: HMAC_SHA256_DUAL_KEY</div>
+            </div>
+
+            <div>
+              <label className="block text-ui-xs font-semibold text-slate-11 uppercase tracking-wider mb-1.5">
+                Compliance Operator Note (Immutable Audit Trail)
+              </label>
+              <textarea
+                value={operatorNote}
+                onChange={(e) => setOperatorNote(e.target.value)}
+                placeholder="Enter justification (e.g. Verified customer photo evidence. Authorized by Support Lead)..."
+                rows={3}
+                className="w-full p-2.5 bg-slate-2 border border-slate-5 rounded-btn text-ui-sm text-slate-12 placeholder:text-slate-10 focus:outline-none focus:border-slate-8 resize-none font-mono"
+              />
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-5">

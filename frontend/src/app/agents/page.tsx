@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState } from "react";
-import { Bot, ArrowRight, CheckCircle2, ShieldAlert } from "lucide-react";
+import Link from "next/link";
+import { Bot, ArrowRight, CheckCircle2, ShieldAlert, Sparkles, Plus } from "lucide-react";
 import { AgentItem } from "@/types";
 import { AgentStudio } from "@/components/studio/agent-studio";
 import { Button } from "@/components/ui/button";
@@ -39,7 +40,14 @@ export default function AgentsPage() {
               {bannerMessage}
             </span>
           )}
-          <Button variant="primary" size="sm" onClick={handleCreateAgent} className="font-semibold shadow-sm">
+          <Link href="/studio/new">
+            <Button variant="secondary" size="sm" className="font-semibold shadow-sm gap-1.5 text-blue-11 border-blue-6 bg-blue-2 hover:bg-blue-3">
+              <Sparkles className="h-3.5 w-3.5" />
+              + Compile with Prompt
+            </Button>
+          </Link>
+          <Button variant="primary" size="sm" onClick={handleCreateAgent} className="font-semibold shadow-sm gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
             + New Agent Graph
           </Button>
         </div>
