@@ -1,13 +1,13 @@
 # DelTix Frontend — Client Documentation & UI Wireframes
 
-## Landing page
+## Operations Console (Next.js 14)
 
-👉 **[`landing/`](./landing/)** — the public landing page (Screen 1). Plain HTML, CSS and JS with no build step. See [`landing/README.md`](./landing/README.md) to run and configure it.
+Run locally from `DelTix/frontend`:
 
 ```bash
-# from the repo root
-python3 -m http.server 3000
-# open http://localhost:3000/frontend/landing/
+npm install
+npm run dev
+# open http://localhost:3000
 ```
 
 ## Product manual

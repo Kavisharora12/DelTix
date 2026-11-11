@@ -8,11 +8,12 @@
 ## Screen-by-Screen Gap Analysis (Against `docs.md`)
 
 ### Screen 1: Public Landing Page (`/`) — Mostly Built (Differences from `docs.md`)
-- **Implemented:** [src/app/page.tsx](./src/app/page.tsx), [src/components/animation/stickman-story.tsx](./src/components/animation/stickman-story.tsx), [src/components/animation/interactive-simulator.tsx](./src/components/animation/interactive-simulator.tsx), plus static [landing/](./landing/).
+- **Implemented:** [src/app/page.tsx](./src/app/page.tsx), [src/components/animation/stickman-story.tsx](./src/components/animation/stickman-story.tsx), [src/components/animation/interactive-simulator.tsx](./src/components/animation/interactive-simulator.tsx), plus separate static HTML site [landing/](./landing/).
 - **Left vs `docs.md`:**
-  - **Interactive Prompt Playground (try-before-login prompt pills + guardrail preview):** Replaced by a numeric invoice-amount / spend-cap simulator (`InteractiveSimulator`); there is no plain-English sample prompt input on `/` (though `landing/` exists separately).
-  - **Top Navigation Links (`Platform`, `Guardrails`, `Pricing`, `Docs`) & `Sign In with Google` CTA on `/`:** Next.js `LandingPage` only shows `Direct Console` and `Interactive Game Tour` (`Sign In` lives inside the authenticated console `TopBar`).
-  - **`Book Enterprise Demo` Modal:** Not implemented in Next.js `/` (only mailto config in `landing/config.js`).
+  - **Interactive Prompt Playground (try-before-login prompt pills + guardrail preview):** Replaced by a numeric invoice-amount / spend-cap simulator (`InteractiveSimulator`); there is no plain-English sample prompt input on `/`.
+  - **Top Navigation Links (`Platform`, `Guardrails`, `Pricing`, `Docs`) & `Sign In with Google` CTA on `/`:** Next.js `LandingPage` only shows `Direct Console` and `Interactive Game Tour` — there is **no Google Sign-In button or `/login` route** in the Next.js app (`src/app/`). The working Google OAuth UI (`Sign in`, `Get started`, work email form passing `?tenant_id=...&redirect=true`) only exists in the separate static HTML folder ([landing/index.html](./landing/index.html), [landing/app.js](./landing/app.js)), which is excluded from the Docker image and not served by Next.js on `:3000`.
+  - **Broken `Sign In` Link & Auth Redirect (`src/components/shell/topbar.tsx:153`):** The console `TopBar` links to `${API_BASE}/v1/auth/google/login` without `?tenant_id=...&redirect=true` (`backend/api-gateway/handlers/gateway_handler.go:114-129` returns `400 MISSING_TENANT_ID`), and `HandleGoogleCallback` returns raw JSON instead of redirecting back to the frontend console. Furthermore, `src/lib/api.ts:16` automatically attaches `"dev_token_deltix"` (`ten_dev_workspace`), masking Google login completely in dev mode.
+  - **`Book Enterprise Demo` Modal:** Not implemented in Next.js `/` (only `mailto:` config in `landing/config.js`).
 
 ---
 
@@ -32,7 +33,7 @@
   - **Interactive Clarification Drawer:** When `POST /v1/agents/compile` returns `status: "CLARIFICATION_REQUIRED"` and `clarification_questions[]`, there is **no drawer/modal** to display questions/suggestions, collect user answers (`clarifications`), and re-compile.
   - **Pre-Flight Synthetic Test Scorecard & HMAC Readiness Seal:** `CompileResponse` returns `synthetic_tests[]`, `validation_report`, and `readiness_token`, none of which are rendered as a scorecard panel in `agent-studio.tsx`.
   - **Live Graph Preview & Agent Switching State:** The *Synthesized Node Execution Order* block (`agent-studio.tsx:229-242`) renders hardcoded placeholder steps instead of `compiledIR.nodes`, and `yamlContent` does not reset when selecting a different agent in the left rail.
-  - **API & Spec Contract Mismatches:** `api.compilePrompt` (`src/lib/api.ts:352-357`) sends `{ prompt, category }` instead of `{ natural_language_prompt, category }` and reads `resp.ir` instead of `resp.agent_ir`. `BackendAgentSpec` (`src/lib/api.ts:25-64`) also expects `ir_payload` (`agent_name`, `capability`) while the backend returns `agent_ir` (`nodes[].payload.capability_id`, `transitions[].from_node`, `transitions[].to_node`).
+  - **API & Spec Contract Mismatches:** `api.compilePrompt` (`src/lib/api.ts:352-357`) sends `{ prompt, category }` instead of `{ natural_language_prompt, category }` and reads `resp.ir` instead of `resp.agent_ir`. Note that `GET /v1/agents/specs` does return `ir_payload` (`AgentSpec.IR`), so spec nodes render in the YAML editor, but `src/lib/api.ts:45-49` types `transitions` as `{ source, target }` instead of backend `AgentIR`'s `{ from_node, to_node }`, and `mapBackendSpecToAgentItem` (`src/lib/api.ts:128-149`) hardcodes `totalRuns: 0` and defaults `successRate` to `100` instead of deriving metrics from real runs.
 
 ---
 
@@ -67,8 +68,20 @@
 
 ---
 
-## Cross-Cutting Items Still Left
+## Cross-Cutting Items & Why Fake / Hardcoded Data Appears in the UI
 
-1. **Client Quick-Start Flow Broken (`docs.md` Section 7):** Step 2 (NL prompt + clarification drawer), Step 3 (chat sandbox / live SSE), and Step 4 (real approval resume + audit trail) cannot complete end-to-end until the gaps above and the [src/lib/api.ts](./src/lib/api.ts) / [src/lib/store.ts](./src/lib/store.ts) contracts are aligned with the backend.
-2. **Cancel / Retry Run Controls:** `Cancel run` and `Retry from checkpoint` in `run-detail-view.tsx` / `checkpoints-view.tsx` have no real backend cancel/retry endpoints wired.
-3. **Local Node Tooling:** `DelTix/frontend/node_modules/.bin` is incomplete locally (`tsc` missing) until a clean `npm install` is run (or built via `DelTix/frontend/Dockerfile`).
+1. **Google Auth Page / Login Flow Missing in Next.js Console:**
+   - There is no `/login` or `/auth` route in `frontend/src/app/`. Working Google OAuth links only live in static `frontend/landing/` ([landing/app.js:19](./landing/app.js)).
+   - Console auto-authenticates via hardcoded `tenantId: "ten_dev_workspace"` (`src/lib/store.ts:54`) + fallback `Bearer dev_token_deltix` (`src/lib/api.ts:16`).
+   - Console `TopBar` `Sign In` button omits `?tenant_id=...&redirect=true`, hitting `400 MISSING_TENANT_ID`.
+2. **Where Real Data Ends & Fake / Hardcoded Data Begins:**
+   - **Real:** Left-rail agent specs & YAML `nodes:` on `/agents` (`GET /v1/agents/specs`), Capabilities list on `/policies` (`GET /v1/capabilities`), and fetched runs/checkpoints when un-errored.
+   - **Fake / Hardcoded:**
+     - `totalRuns: 0` & `successRate: 100` in `mapBackendSpecToAgentItem` (`src/lib/api.ts:128-149`).
+     - `Synthesized Node Execution Order` list (`1. [INGEST] ingest_invoice` ... `6. [TOOL] disburse_payout`) is static JSX in `agent-studio.tsx:234-241`.
+     - `createRunFromAgent` sends hardcoded `$1,250 Apex Logistics Corp` inputs and falls back to fabricating a local `run_*` after `startRun` fails to unwrap `resp.run.run_id` (`src/lib/store.ts:206-273`).
+     - `approveRun` fabricates a local `atok_live_*` token and marks status `COMPLETED` even if `decideApproval` fails (`src/lib/store.ts:301-347`).
+     - Landing KPI strip (`$42.8M+`, `0.00%`, `14,200+`, `99.99%`), Policy Rules (`INITIAL_POLICIES`), Ledger (`REF-*`, `idem_sha256_*`), and Audit (`sha256_*`) are hardcoded or synthesized client-side.
+3. **Client Quick-Start Flow Broken (`docs.md` Section 7):** Step 2 (NL prompt + clarification drawer), Step 3 (chat sandbox / live SSE), and Step 4 (real approval resume + audit trail) cannot complete end-to-end until the gaps above and the [src/lib/api.ts](./src/lib/api.ts) / [src/lib/store.ts](./src/lib/store.ts) contracts are aligned with the backend.
+4. **Cancel / Retry Run Controls:** `Cancel run` and `Retry from checkpoint` in `run-detail-view.tsx` / `checkpoints-view.tsx` have no real backend cancel/retry endpoints wired.
+5. **Local Node Tooling:** `DelTix/frontend/node_modules/.bin` is incomplete locally (`tsc` missing) until a clean `npm install` is run (or built via `DelTix/frontend/Dockerfile`).

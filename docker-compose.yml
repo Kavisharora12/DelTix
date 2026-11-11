@@ -71,6 +71,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      MEMORY_SERVICE_URL: http://memory-service:8083
+      CAPABILITY_POLICY_SERVICE_URL: http://capability-policy-service:8084
     expose:
       - "8081"
     networks:
