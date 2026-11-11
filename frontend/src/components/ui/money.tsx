@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 
 export interface MoneyProps {
   cents?: number;
+  amountCents?: number;
   amount?: number; // In dollars/units if cents not supplied
   currency?: string;
   showCurrency?: boolean;
@@ -19,6 +20,7 @@ export interface MoneyProps {
  */
 export function Money({
   cents,
+  amountCents,
   amount,
   currency = "USD",
   showCurrency = true,
@@ -27,7 +29,8 @@ export function Money({
   amountClassName,
   secondaryCurrencyClassName,
 }: MoneyProps) {
-  const valueInDollars = cents !== undefined ? cents / 100 : amount ?? 0;
+  const effectiveCents = cents !== undefined ? cents : amountCents;
+  const valueInDollars = effectiveCents !== undefined ? effectiveCents / 100 : amount ?? 0;
   const isNegative = valueInDollars < 0;
   const absValue = Math.abs(valueInDollars);
 

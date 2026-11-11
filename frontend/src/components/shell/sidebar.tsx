@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   Home,
+  LayoutDashboard,
   Play,
   CheckCircle2,
   Bot,
@@ -15,6 +16,8 @@ import {
   PanelLeftClose,
   PanelLeft,
   Building2,
+  Sparkles,
+  Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDelTixStore } from "@/lib/store";
@@ -28,10 +31,22 @@ export function Sidebar() {
 
   const navItems = [
     {
-      label: "Landing & Story",
-      href: "/",
-      icon: Home,
-      match: (p: string) => p === "/",
+      label: "Dashboard",
+      href: "/dashboard",
+      icon: LayoutDashboard,
+      match: (p: string) => p === "/dashboard",
+    },
+    {
+      label: "Compiler Studio",
+      href: "/studio/new",
+      icon: Sparkles,
+      match: (p: string) => p.startsWith("/studio"),
+    },
+    {
+      label: "Live Sandbox",
+      href: "/sandbox",
+      icon: Terminal,
+      match: (p: string) => p.startsWith("/sandbox"),
     },
     {
       label: "Runs",
@@ -69,6 +84,12 @@ export function Sidebar() {
       href: "/audit",
       icon: FileText,
       match: (p: string) => p.startsWith("/audit"),
+    },
+    {
+      label: "Landing & Story",
+      href: "/",
+      icon: Home,
+      match: (p: string) => p === "/",
     },
   ];
 
