@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { ShieldCheck, Plus, CheckCircle2, AlertTriangle, Lock, Server, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
@@ -28,68 +29,12 @@ interface LiveCapability {
   status: string;
 }
 
-const INITIAL_POLICIES: PolicyRule[] = [
-  {
-    id: "pol_01",
-    name: "max_budget_usd",
-    scope: "global",
-    expression: "disbursement_amount_usd <= 500.00",
-    actionOnViolation: "REQUIRE_HUMAN_APPROVAL",
-    currentLimit: "$500.00 / txn",
-    status: "active",
-  },
-  {
-    id: "pol_02",
-    name: "daily_tenant_spend_cap",
-    scope: "global",
-    expression: "sum(disbursements_24h_usd) <= 10000.00",
-    actionOnViolation: "REQUIRE_HUMAN_APPROVAL",
-    currentLimit: "$10,000.00 / day",
-    status: "active",
-  },
-  {
-    id: "pol_03",
-    name: "approved_vendor_whitelist_only",
-    scope: "payables-reconciler",
-    expression: "recipient_paypal_id in tenant_approved_vendors",
-    actionOnViolation: "REJECT_RUN",
-    currentLimit: "Enforced",
-    status: "active",
-  },
-  {
-    id: "pol_04",
-    name: "zero_tolerance_grounding",
-    scope: "global",
-    expression: "recomputed_math_variance_cents == 0",
-    actionOnViolation: "REJECT_RUN",
-    currentLimit: "$0.00 tolerance",
-    status: "active",
-  },
-  {
-    id: "pol_05",
-    name: "idempotency_duplicate_guard",
-    scope: "global",
-    expression: "action_intents.exists(idempotency_key) == false",
-    actionOnViolation: "REJECT_RUN",
-    currentLimit: "Strict unique key",
-    status: "active",
-  },
-  {
-    id: "pol_06",
-    name: "consecutive_failure_circuit_breaker",
-    scope: "paypal.batch_payout",
-    expression: "consecutive_upstream_timeouts < 5",
-    actionOnViolation: "CIRCUIT_BREAK",
-    currentLimit: "5 timeouts (60s reset)",
-    status: "active",
-  },
-];
-
 export default function PoliciesPage() {
   const [activeTab, setActiveTab] = useState<"policies" | "capabilities">("policies");
-  const [policies, setPolicies] = useState<PolicyRule[]>(INITIAL_POLICIES);
+  const [policies, setPolicies] = useState<PolicyRule[]>([]);
   const [capabilities, setCapabilities] = useState<LiveCapability[]>([]);
   const [loadingCaps, setLoadingCaps] = useState(false);
+  const [loadingPolicies, setLoadingPolicies] = useState(false);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [ruleName, setRuleName] = useState("");
@@ -100,6 +45,9 @@ export default function PoliciesPage() {
   useEffect(() => {
     let mounted = true;
     setLoadingCaps(true);
+    setLoadingPolicies(true);
+
+    // Fetch live capabilities from backend
     api.listCapabilities()
       .then((data) => {
         if (mounted && data.capabilities) {
@@ -111,6 +59,67 @@ export default function PoliciesPage() {
       })
       .finally(() => {
         if (mounted) setLoadingCaps(false);
+      });
+
+    // Derive active policies directly from compiled agent specifications
+    api.listSpecs()
+      .then((specs) => {
+        if (!mounted) return;
+        const derived: PolicyRule[] = [];
+        specs.forEach((s) => {
+          const pol = s.agent_ir?.policies;
+          if (pol?.max_budget_usd !== undefined && pol.max_budget_usd > 0) {
+            derived.push({
+              id: `pol_${s.spec_id}_budget`,
+              name: "max_budget_usd",
+              scope: s.name,
+              expression: `disbursement_amount_usd <= ${pol.max_budget_usd.toFixed(2)}`,
+              actionOnViolation: "REQUIRE_HUMAN_APPROVAL",
+              currentLimit: `$${pol.max_budget_usd.toFixed(2)} / run`,
+              status: "active",
+            });
+          }
+          if (pol?.human_approval_threshold_usd !== undefined && pol.human_approval_threshold_usd > 0) {
+            derived.push({
+              id: `pol_${s.spec_id}_threshold`,
+              name: "human_approval_threshold_usd",
+              scope: s.name,
+              expression: `amount_usd > ${pol.human_approval_threshold_usd.toFixed(2)}`,
+              actionOnViolation: "REQUIRE_HUMAN_APPROVAL",
+              currentLimit: `$${pol.human_approval_threshold_usd.toFixed(2)} gate`,
+              status: "active",
+            });
+          }
+          if (pol?.allowed_capabilities && pol.allowed_capabilities.length > 0) {
+            derived.push({
+              id: `pol_${s.spec_id}_caps`,
+              name: "capability_whitelist",
+              scope: s.name,
+              expression: `dispatched_capability in [${pol.allowed_capabilities.join(", ")}]`,
+              actionOnViolation: "REJECT_RUN",
+              currentLimit: `${pol.allowed_capabilities.length} capabilities permitted`,
+              status: "active",
+            });
+          }
+          if (pol?.read_only) {
+            derived.push({
+              id: `pol_${s.spec_id}_readonly`,
+              name: "read_only_enforcement",
+              scope: s.name,
+              expression: "is_mutation == false",
+              actionOnViolation: "REJECT_RUN",
+              currentLimit: "Mutations blocked",
+              status: "active",
+            });
+          }
+        });
+        setPolicies(derived);
+      })
+      .catch((err) => {
+        console.warn("Could not load agent specs for policy derivation:", err);
+      })
+      .finally(() => {
+        if (mounted) setLoadingPolicies(false);
       });
 
     return () => {
@@ -290,53 +299,71 @@ export default function PoliciesPage() {
       {/* Main Content Area */}
       <div className="flex-1 overflow-auto bg-app">
         {activeTab === "policies" ? (
-          <table className="w-full border-collapse text-left text-ui">
-            <thead className="sticky top-0 bg-panel border-b border-slate-5 text-ui-xs text-slate-10 font-medium z-10">
-              <tr>
-                <th className="py-2 px-3 w-48">Policy Rule</th>
-                <th className="py-2 px-3 w-36">Scope</th>
-                <th className="py-2 px-3">Deterministic Expression</th>
-                <th className="py-2 px-3 w-40">Current Threshold</th>
-                <th className="py-2 px-3 w-48">Action on Exceed</th>
-                <th className="py-2 px-3 w-24 text-center">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-5">
-              {policies.map((pol) => (
-                <tr key={pol.id} className="hover:bg-slate-3 transition-colors h-10">
-                  <td className="py-2 px-3 font-medium text-slate-12">
-                    {pol.name}
-                  </td>
-                  <td className="py-2 px-3 font-mono text-ui-xs text-slate-10">
-                    {pol.scope}
-                  </td>
-                  <td className="py-2 px-3 font-mono text-ui-xs text-slate-11">
-                    {pol.expression}
-                  </td>
-                  <td className="py-2 px-3 text-slate-12 font-medium">
-                    {pol.currentLimit}
-                  </td>
-                  <td className="py-2 px-3">
-                    <span
-                      className={`px-1.5 py-0.5 rounded text-[11px] font-mono border ${
-                        pol.actionOnViolation === "REQUIRE_HUMAN_APPROVAL"
-                          ? "bg-amber-3 border-amber-6 text-amber-11"
-                          : "bg-red-3 border-red-6 text-red-11"
-                      }`}
-                    >
-                      {pol.actionOnViolation}
-                    </span>
-                  </td>
-                  <td className="py-2 px-3 text-center">
-                    <span className="inline-flex items-center gap-1 text-green-11 text-ui-xs font-medium">
-                      <CheckCircle2 className="h-3 w-3 text-green-9" />
-                      Active
-                    </span>
-                  </td>
+          policies.length === 0 ? (
+            <div className="p-16 text-center text-slate-10 max-w-md mx-auto space-y-3">
+              <ShieldCheck className="h-10 w-10 text-slate-8 mx-auto stroke-1" />
+              <h3 className="text-title-section text-slate-12">No Policy Rules Configured Yet</h3>
+              <p className="text-ui-xs text-slate-10">
+                Compile an agent specification in the Studio to establish active spend limits, permitted capabilities, and human approval thresholds.
+              </p>
+              <div className="pt-2">
+                <Link href="/studio/new">
+                  <Button variant="primary" size="sm" className="gap-1.5">
+                    <Plus className="h-3.5 w-3.5" />
+                    Compile First Agent
+                  </Button>
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <table className="w-full border-collapse text-left text-ui">
+              <thead className="sticky top-0 bg-panel border-b border-slate-5 text-ui-xs text-slate-10 font-medium z-10">
+                <tr>
+                  <th className="py-2 px-3 w-48">Policy Rule</th>
+                  <th className="py-2 px-3 w-36">Scope</th>
+                  <th className="py-2 px-3">Deterministic Expression</th>
+                  <th className="py-2 px-3 w-40">Current Threshold</th>
+                  <th className="py-2 px-3 w-48">Action on Exceed</th>
+                  <th className="py-2 px-3 w-24 text-center">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-5">
+                {policies.map((pol) => (
+                  <tr key={pol.id} className="hover:bg-slate-3 transition-colors h-10">
+                    <td className="py-2 px-3 font-medium text-slate-12">
+                      {pol.name}
+                    </td>
+                    <td className="py-2 px-3 font-mono text-ui-xs text-slate-10">
+                      {pol.scope}
+                    </td>
+                    <td className="py-2 px-3 font-mono text-ui-xs text-slate-11">
+                      {pol.expression}
+                    </td>
+                    <td className="py-2 px-3 text-slate-12 font-medium">
+                      {pol.currentLimit}
+                    </td>
+                    <td className="py-2 px-3">
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono border ${
+                          pol.actionOnViolation === "REQUIRE_HUMAN_APPROVAL"
+                            ? "bg-amber-3 border-amber-6 text-amber-11"
+                            : "bg-red-3 border-red-6 text-red-11"
+                        }`}
+                      >
+                        {pol.actionOnViolation}
+                      </span>
+                    </td>
+                    <td className="py-2 px-3 text-center">
+                      <span className="inline-flex items-center gap-1 text-green-11 text-ui-xs font-medium">
+                        <CheckCircle2 className="h-3 w-3 text-green-9" />
+                        Active
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
         ) : (
           <div>
             {loadingCaps ? (

@@ -24,18 +24,22 @@ frontend/
 ├── wiring.md                            # Feature-to-component wiring documentation
 ├── src/
 │   ├── app/                             # Next.js 14 App Router routes & error boundaries
-│   │   ├── page.tsx                     # Public Landing Page & Interactive Showcase
+│   │   ├── page.tsx                     # /: Public Landing Page, Nav & Prompt Playground
+│   │   ├── dashboard/page.tsx           # /dashboard: Client Main Dashboard & 4 KPI cards
+│   │   ├── studio/new/page.tsx          # /studio/new: Plain-English Compiler Studio & Clarifications
+│   │   ├── sandbox/page.tsx             # /sandbox: Live Chatbot & SSE Execution Sandbox
+│   │   ├── sandbox/[specId]/page.tsx    # /sandbox/:specId: Spec-targeted sandbox
 │   │   ├── layout.tsx                   # Root HTML layout with font configuration
 │   │   ├── error.tsx                    # Next.js client-side error boundary
 │   │   ├── global-error.tsx             # Root HTML-level error boundary
 │   │   ├── not-found.tsx                # Custom 404 page with console routing
 │   │   ├── runs/page.tsx                # /runs: Primary data table & filter bar
 │   │   ├── runs/[id]/page.tsx           # /runs/[id]: Full DAG & node inspector
-│   │   ├── approvals/page.tsx           # /approvals: Human signoff inbox & decision sheet
+│   │   ├── approvals/page.tsx           # /approvals: Human signoff inbox & operator audit note
 │   │   ├── agents/page.tsx              # /agents: Agent Registry & Visual Studio
 │   │   ├── policies/page.tsx            # /policies: Spend limits & capability guards
 │   │   ├── ledger/page.tsx              # /ledger: Idempotent settlement ledger
-│   │   └── audit/page.tsx               # /audit: Append-only SHA-256 audit trail
+│   │   └── audit/page.tsx               # /audit: Append-only SHA-256 audit trail & record inspector
 │   ├── components/
 │   │   ├── shell/                       # Application scaffolding & navigation
 │   │   │   ├── app-shell.tsx            # Context switcher (Landing vs Console shell)
@@ -189,6 +193,76 @@ frontend/
 
 ---
 
+### 3.2 Client Main Dashboard (`/dashboard`)
+- **File:** `frontend/src/app/dashboard/page.tsx`
+- **Features & Live Data Synchronization:**
+  - **4 Financial KPI Cards:**
+    - *Total Settled Volume:* Sum of all completed transaction amounts in USD with real-time trend.
+    - *Active Agents:* Total count of registered and compiled agent specifications with live execution counter.
+    - *Pending Approvals:* Count of runs in `PAUSED_FOR_APPROVAL` state with immediate amber action pill.
+    - *Protected by Caps:* Protected dollar volume blocked by policy engine limits.
+  - **Recent Agent Executions Table:** Real-time table displaying Agent Name, Trigger / Input, Status, Spend, and 1-click action buttons (`View Run` &rarr; `/runs/[id]`, `Review Gate` &rarr; `/approvals`).
+  - **Quick Action Bar:** Direct navigation to `/studio/new`, `/sandbox`, and `/approvals`.
+
+---
+
+### 3.3 Agent Compiler Studio (`/studio/new`)
+- **File:** `frontend/src/app/studio/new/page.tsx`
+- **Features & Live Data Synchronization:**
+  - **Natural Language Financial Prompt Composer:** Plain-English textarea allowing operators to express complex financial policies without writing code.
+  - **Load Example Template:** Dropdown selector with 4 pre-configured templates:
+    1. *E-Commerce Automated Refund Agent*
+    2. *Vendor Invoice & Accounts Payable Agent*
+    3. *Chargeback & Dispute Mitigation Agent*
+    4. *Monthly SaaS Proration & Credit Agent*
+  - **Quick Financial Settings:** Max Spend Limit ($), Human Approval Threshold ($), and Permitted Capabilities checkboxes (`paypal_get_capture`, `paypal_refund_capture`, `return_policy_rag`).
+  - **Interactive Clarification Drawer:** When `POST /v1/agents/compile` returns `status: "CLARIFICATION_REQUIRED"`, slides out with the required boundary questions, suggestions, and recommendations, and allows re-compiling with `clarifications`.
+  - **Pre-Flight Test Scorecard:** Renders synthetic execution test results from the compiler service.
+  - **HMAC Readiness Token Seal:** Displays verified cryptographic readiness token.
+  - **Synthesized Execution DAG:** Displays topologically sorted nodes dynamically from `agent_ir.nodes`.
+
+---
+
+### 3.4 Live Agent Sandbox & Chatbot (`/sandbox` & `/sandbox/[specId]`)
+- **Files:** `frontend/src/app/sandbox/page.tsx`, `frontend/src/app/sandbox/[specId]/page.tsx`, `frontend/src/components/sandbox/sandbox-client.tsx`
+- **Features & Live Data Synchronization:**
+  - **1. Conversational Chat Terminal:**
+    - Free-form user request input or dynamic form inputs (`order_id`, `amount_usd`, `customer_email`).
+    - Quick test trigger preset pills (e.g. *$38 Auto-Refund*, *$150 Approval Gate*).
+    - Chat message thread with customer request bubbles, system verification pills (`[Python Decimal AST ✓]`), and agent execution response bubbles.
+  - **2. Live SSE Execution Timeline:**
+    - Connects to `/api/gateway/v1/runs/{id}/stream` over Server-Sent Events.
+    - Streams live `checkpoint` and `run_status` events without polling.
+    - Renders step indexes, tool execution badges, duration, inputs/outputs, and real-time status badges.
+    - If execution breaches policy and pauses, flashes the Human Approval banner with a 1-click link to `/approvals`.
+  - **3. State, Memory & Integrity Inspector:**
+    - Live JSON state variable snapshot inspection.
+    - Zero-Hallucination integrity proof badges (`[AST Math Engine: 0 Variance ✓]`, `[Grounding Verifier: Quote Proof ✓]`, `[PII Redaction: Sanitized ✓]`, `[HMAC Readiness: Sealed ✓]`).
+    - Mem0 persistent user memory context.
+
+---
+
+### 3.5 Human Approvals Gate (`/approvals`)
+- **File:** `frontend/src/app/approvals/page.tsx`, `frontend/src/components/runs/approval-decision-panel.tsx`
+- **Features & Live Data Synchronization:**
+  - Live filterable inbox of runs in `PAUSED_FOR_APPROVAL` status.
+  - **Compliance Operator Note:** Mandatory audit note textarea on approve (`operatorNote`) for SOC2/financial audit records.
+  - Calls `api.decideApproval(approvalId, "APPROVED" | "REJECTED", reason)` using the actual backend `pending_approval.approval_id`.
+  - Automatically fetches resumed run details and displays the cryptographically signed HMAC authorization token.
+
+---
+
+### 3.6 Financial Audit Ledger & Compliance Trail (`/audit`)
+- **File:** `frontend/src/app/audit/page.tsx`
+- **Features & Live Data Synchronization:**
+  - Full audit trail with `SEQ #`, Timestamp, Agent, Action, Amount, Operator, Status, and SHA-256 Checksum.
+  - **Filter Bar:** Filter by Agent, Action / Event, Date Range (24h, 7d, 30d, all), and global keyword search.
+  - **Cursor Pagination:** Fast client-side cursor pagination (`Previous 20` / `Next 20`).
+  - **Export Capabilities:** 1-click `Export CSV` and `Export JSON` file generation.
+  - **Cryptographic Record Inspector Drawer:** Clicking any row reveals SHA-256 Checksum, Supabase PostgreSQL 16 integrity verification, PayPal Request Idempotency Key, and PII Masking Status.
+
+---
+
 ### 3.7 Spend Policies (`/policies`)
 - **File:** `frontend/src/app/policies/page.tsx`
 - **Wiring & Interactive Actions:**
@@ -250,6 +324,7 @@ frontend/
 
 ## 4. Verification & Health
 
-- **Build Command:** `npm run build` inside `frontend/` (Verified 0 errors across all 10 routes).
+- **Build Command:** `npm run build` inside `frontend/` (Verified 0 errors across all 13 routes).
 - **Production Server:** `npx next start -p 3001` (Serving on `http://localhost:3001`).
-- **Git Branch:** `d-frontend` (pushed to `origin/d-frontend`).
+- **Synchronized Backend Services:** API Gateway (`:8080`), Compiler (`:8081`), Runtime (`:8082`), Capability & Policy (`:8084`), Memory (`:8083`).
+- **Git Branch:** `main`.
