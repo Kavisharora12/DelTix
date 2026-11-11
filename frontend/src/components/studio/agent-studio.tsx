@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -46,6 +46,12 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
   const [isCompiling, setIsCompiling] = useState(false);
   const [compiledIR, setCompiledIR] = useState<Record<string, any> | null>(null);
 
+  useEffect(() => {
+    setYamlContent(agent.definitionYaml);
+    setDiagnostics([]);
+    setCompiledIR(null);
+  }, [agent.id, agent.definitionYaml]);
+
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
   const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
 
@@ -53,9 +59,13 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
     setIsCompiling(true);
     setPublishFeedback(null);
     try {
-      const resp = await api.compilePrompt(yamlContent, "financial-disbursement");
-      if (resp.ir) {
-        setCompiledIR(resp.ir);
+      const resp = await api.compilePrompt({
+        name: agent.name,
+        category: "financial-disbursement",
+        natural_language_prompt: yamlContent,
+      });
+      if (resp.agent_ir) {
+        setCompiledIR(resp.agent_ir);
       }
 
       if (resp.validation_report?.errors && resp.validation_report.errors.length > 0) {
@@ -227,17 +237,34 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
 
           {/* Quick Graph Structure Preview */}
           <div className="h-48 border-t border-slate-5 bg-slate-2 p-3 overflow-y-auto">
-            <div className="text-ui-xs text-slate-10 font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5">
-              <GitBranch className="h-3.5 w-3.5" />
-              <span>Synthesized Node Execution Order</span>
+            <div className="text-ui-xs text-slate-10 font-semibold uppercase tracking-wider mb-2 flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <GitBranch className="h-3.5 w-3.5" />
+                <span>Synthesized Node Execution Order</span>
+              </div>
+              {compiledIR?.nodes && (
+                <span className="text-[11px] font-mono text-green-11">
+                  {compiledIR.nodes.length} nodes
+                </span>
+              )}
             </div>
             <div className="space-y-1 font-mono text-ui-xs text-slate-11">
-              <div>1. [INGEST] ingest_invoice</div>
-              <div>2. [MATH] reconcile_math (tolerance: 0.00)</div>
-              <div>3. [GROUND] verify_grounding</div>
-              <div>4. [POLICY] check_policy (max_budget_usd)</div>
-              <div>5. [GATE] require_human_approval</div>
-              <div>6. [TOOL] disburse_payout (paypal.batch_payout)</div>
+              {compiledIR?.nodes && compiledIR.nodes.length > 0 ? (
+                compiledIR.nodes.map((node: any, idx: number) => (
+                  <div key={node.id || idx} className="truncate">
+                    {idx + 1}. [{node.type || "NODE"}] {node.title || node.id}
+                  </div>
+                ))
+              ) : (
+                <>
+                  <div>1. [INGEST] ingest_invoice</div>
+                  <div>2. [MATH] reconcile_math (Decimal AST)</div>
+                  <div>3. [GROUND] verify_grounding</div>
+                  <div>4. [POLICY] check_policy (max_budget_usd)</div>
+                  <div>5. [GATE] require_human_approval</div>
+                  <div>6. [TOOL] disburse_payout (paypal_refund_capture)</div>
+                </>
+              )}
             </div>
           </div>
         </div>
