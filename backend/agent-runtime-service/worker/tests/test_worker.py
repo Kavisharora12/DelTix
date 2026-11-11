@@ -579,6 +579,56 @@ class TestDynamicLangGraphWorker(unittest.TestCase):
                     os.environ[k] = v
             os.environ.pop("LANGSMITH_API_KEY", None)
 
+    def test_worker_healthz_and_http_memory_endpoints(self) -> None:
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from fastapi.testclient import TestClient
+        from api.grpc_server import create_worker_app
+        from services.executor_service import HTTPMemoryClient
+
+        client = TestClient(create_worker_app())
+        resp = client.get("/healthz")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["status"], "ok")
+
+        recorded_calls: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
+
+        class _FakeAsyncClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                pass
+
+            async def __aenter__(self) -> "_FakeAsyncClient":
+                return self
+
+            async def __aexit__(self, *args: Any) -> None:
+                return None
+
+            async def post(self, url: str, headers: dict[str, Any] | None = None, json: dict[str, Any] | None = None) -> Any:
+                recorded_calls.append((url, headers or {}, json or {}))
+                mock_resp = MagicMock()
+                mock_resp.status_code = 200
+                mock_resp.raise_for_status = lambda: None
+                mock_resp.json = lambda: {"memories": [{"id": "m1", "text": "ok"}]}
+                return mock_resp
+
+        mem_client = HTTPMemoryClient(base_url="http://memory-service:8083")
+        with patch("services.executor_service.httpx.AsyncClient", _FakeAsyncClient):
+            memories, degraded = _run_async(
+                mem_client.retrieve_memories("ten_1", "agt_1", "ns_1", "invoice policy", top_k=3)
+            )
+            stored = _run_async(
+                mem_client.store_memory("ten_1", "agt_1", "ns_1", "stored fact", {"run_id": "run_1"})
+            )
+
+        self.assertFalse(degraded)
+        self.assertEqual(len(memories), 1)
+        self.assertTrue(stored)
+        self.assertEqual(recorded_calls[0][0], "http://memory-service:8083/internal/v1/memory/retrieve")
+        self.assertEqual(recorded_calls[0][1].get("X-Tenant-ID"), "ten_1")
+        self.assertEqual(recorded_calls[0][2].get("limit"), 3)
+        self.assertEqual(recorded_calls[1][0], "http://memory-service:8083/internal/v1/memory/store")
+        self.assertEqual(recorded_calls[1][1].get("X-Tenant-ID"), "ten_1")
+        self.assertEqual(recorded_calls[1][2].get("messages"), [{"role": "assistant", "content": "stored fact"}])
+
 
 if __name__ == "__main__":
     unittest.main()

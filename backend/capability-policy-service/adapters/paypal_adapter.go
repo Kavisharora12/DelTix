@@ -201,12 +201,15 @@ func (a *PayPalSandboxAdapter) dispatchDynamicRESTCall(
 
 	// 2. Build remaining parameters for query string (GET/DELETE) or JSON body (POST/PUT/PATCH)
 	allowedProps := extractSchemaProperties(contract.ParametersSchema)
+	isWriteOrder := method == http.MethodPost && (contract.CapabilityID == "paypal.orders.create" || resolvedPath == "/v2/checkout/orders")
+	isWriteInvoice := method == http.MethodPost && (contract.CapabilityID == "paypal.invoice.create" || resolvedPath == "/v2/invoicing/invoices")
 	bodyParams := make(map[string]interface{})
 	for k, v := range parameters {
 		if consumedKeys[k] {
 			continue
 		}
 		if k == "paypal_payload" || len(allowedProps) == 0 || allowedProps[k] ||
+			((isWriteOrder || isWriteInvoice) && isFlatPayPalInputKey(k)) ||
 			(allowedProps["amount"] && (k == "amount_usd" || k == "currency_code" || k == "intent")) {
 			bodyParams[k] = v
 		}
@@ -234,7 +237,7 @@ func (a *PayPalSandboxAdapter) dispatchDynamicRESTCall(
 			fullURL += "?" + q.Encode()
 		}
 	} else {
-		bodyBytes, err := buildPayPalRequestBody(bodyParams)
+		bodyBytes, err := buildPayPalRequestBody(contract.CapabilityID, resolvedPath, bodyParams)
 		if err != nil {
 			return nil, "", err
 		}
@@ -283,20 +286,154 @@ func (a *PayPalSandboxAdapter) dispatchDynamicRESTCall(
 	return out, resID, nil
 }
 
-// buildPayPalRequestBody formats body parameters cleanly; if payload is already structured for PayPal,
-// it forwards it directly; if flat amount_usd/currency_code is passed, it formats standard PayPal Money object.
-func buildPayPalRequestBody(bodyParams map[string]interface{}) ([]byte, error) {
+func isFlatPayPalInputKey(k string) bool {
+	switch k {
+	case "amount_usd", "amount", "currency_code", "currency", "customer_email",
+		"recipient_email", "item_name", "description", "invoice_id", "intent",
+		"purchase_units", "items", "detail", "primary_recipients":
+		return true
+	default:
+		return false
+	}
+}
+
+func firstNonEmptyString(params map[string]interface{}, keys ...string) string {
+	for _, k := range keys {
+		if v, ok := params[k]; ok && v != nil {
+			if s := strings.TrimSpace(fmt.Sprintf("%v", v)); s != "" && s != "<nil>" {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+func toFloat64(val interface{}) (float64, bool) {
+	switch n := val.(type) {
+	case float64:
+		return n, true
+	case float32:
+		return float64(n), true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
+func extractPositiveAmount(params map[string]interface{}) (float64, bool) {
+	for _, k := range []string{"amount_usd", "amount"} {
+		if v, ok := params[k]; ok {
+			if f, okF := toFloat64(v); okF && f > 0 {
+				return f, true
+			}
+		}
+	}
+	if rawItems, ok := params["items"].([]interface{}); ok && len(rawItems) > 0 {
+		var total float64
+		for _, item := range rawItems {
+			m, okM := item.(map[string]interface{})
+			if !okM {
+				continue
+			}
+			if f, okF := toFloat64(m["item_total"]); okF && f > 0 {
+				total += f
+			} else if f, okF := toFloat64(m["item_cost"]); okF && f > 0 {
+				qty := 1.0
+				if q, okQ := toFloat64(m["quantity"]); okQ && q > 0 {
+					qty = q
+				}
+				total += f * qty
+			}
+		}
+		if total > 0 {
+			return total, true
+		}
+	}
+	return 0, false
+}
+
+// buildPayPalRequestBody formats body parameters cleanly for PayPal REST v1/v2 APIs,
+// supporting both structured PayPal payloads and flat DelTix workflow inputs.
+func buildPayPalRequestBody(capabilityID string, resolvedPath string, bodyParams map[string]interface{}) ([]byte, error) {
 	if len(bodyParams) == 0 {
 		return []byte("{}"), nil
 	}
 	if rawPayload, ok := bodyParams["paypal_payload"].(map[string]interface{}); ok {
 		return json.Marshal(rawPayload)
 	}
-	if amountUSD, hasAmount := bodyParams["amount_usd"].(float64); hasAmount && bodyParams["amount"] == nil && bodyParams["purchase_units"] == nil {
-		currency, _ := bodyParams["currency_code"].(string)
-		if currency == "" {
-			currency = "USD"
+
+	currency := strings.ToUpper(firstNonEmptyString(bodyParams, "currency_code", "currency"))
+	if currency == "" {
+		currency = "USD"
+	}
+	itemDesc := firstNonEmptyString(bodyParams, "description", "item_name", "invoice_id")
+	if itemDesc == "" {
+		itemDesc = "DelTix Service"
+	}
+
+	if capabilityID == "paypal.orders.create" || resolvedPath == "/v2/checkout/orders" {
+		intent := strings.ToUpper(firstNonEmptyString(bodyParams, "intent"))
+		if intent == "" {
+			intent = "CAPTURE"
 		}
+		if bodyParams["purchase_units"] != nil {
+			return json.Marshal(map[string]interface{}{
+				"intent":         intent,
+				"purchase_units": bodyParams["purchase_units"],
+			})
+		}
+		if amountUSD, ok := extractPositiveAmount(bodyParams); ok {
+			return json.Marshal(map[string]interface{}{
+				"intent": intent,
+				"purchase_units": []map[string]interface{}{
+					{
+						"description": itemDesc,
+						"amount": map[string]string{
+							"currency_code": currency,
+							"value":         fmt.Sprintf("%.2f", amountUSD),
+						},
+					},
+				},
+			})
+		}
+	}
+
+	if (capabilityID == "paypal.invoice.create" || resolvedPath == "/v2/invoicing/invoices") && bodyParams["detail"] == nil {
+		payload := map[string]interface{}{
+			"detail": map[string]interface{}{"currency_code": currency},
+		}
+		if email := firstNonEmptyString(bodyParams, "recipient_email", "customer_email"); email != "" {
+			payload["primary_recipients"] = []map[string]interface{}{
+				{"billing_info": map[string]string{"email_address": email}},
+			}
+		}
+		hasPayPalInvoiceItems := false
+		if rawItems, ok := bodyParams["items"].([]interface{}); ok && len(rawItems) > 0 {
+			if firstItem, okM := rawItems[0].(map[string]interface{}); okM && firstItem["unit_amount"] != nil {
+				hasPayPalInvoiceItems = true
+			}
+		}
+		if hasPayPalInvoiceItems {
+			payload["items"] = bodyParams["items"]
+		} else if amountUSD, ok := extractPositiveAmount(bodyParams); ok {
+			payload["items"] = []map[string]interface{}{
+				{
+					"name":     itemDesc,
+					"quantity": "1",
+					"unit_amount": map[string]string{
+						"currency_code": currency,
+						"value":         fmt.Sprintf("%.2f", amountUSD),
+					},
+				},
+			}
+		}
+		return json.Marshal(payload)
+	}
+
+	if amountUSD, hasAmount := bodyParams["amount_usd"].(float64); hasAmount && bodyParams["amount"] == nil && bodyParams["purchase_units"] == nil {
 		moneyObj := map[string]string{
 			"currency_code": currency,
 			"value":         fmt.Sprintf("%.2f", amountUSD),

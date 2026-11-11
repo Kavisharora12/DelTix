@@ -599,12 +599,13 @@ class HTTPMemoryClient(MemoryClientProtocol):
             bounded_limit = max(1, min(100, int(top_k)))
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
-                    f"{self._base_url}/internal/v1/memories/search",
+                    f"{self._base_url}/internal/v1/memory/retrieve",
+                    headers={"X-Tenant-ID": tenant_id},
                     json={
                         "tenant_id": tenant_id,
                         "agent_id": agent_id,
                         "query": query,
-                        "top_k": top_k,
+                        "limit": bounded_limit,
                     },
                 )
                 resp.raise_for_status()
@@ -626,13 +627,12 @@ class HTTPMemoryClient(MemoryClientProtocol):
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
-                    f"{self._base_url}/internal/v1/memories/add",
+                    f"{self._base_url}/internal/v1/memory/store",
+                    headers={"X-Tenant-ID": tenant_id},
                     json={
                         "tenant_id": tenant_id,
                         "agent_id": agent_id,
-                        "namespace": namespace,
-                        "content": content,
-                        "metadata": metadata,
+                        "messages": [{"role": "assistant", "content": content}],
                     },
                 )
                 return resp.status_code < 300

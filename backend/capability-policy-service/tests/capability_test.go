@@ -3,6 +3,7 @@ package tests
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strings"
@@ -254,5 +255,76 @@ func TestDynamicPayPalAdapterFailsClosedAndInterpolatesEndpoint(t *testing.T) {
 	}
 	if res2["idempotent_replay"] != true {
 		t.Fatalf("expected idempotent_replay=true on second call with same idempotency_key")
+	}
+}
+
+func TestPayPalAdapterFormatsOrderAndInvoiceCreateBodies(t *testing.T) {
+	ctx := context.Background()
+	var capturedBodies []map[string]interface{}
+	var capturedPaths []string
+
+	mockHTTPClient := &http.Client{
+		Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if strings.HasSuffix(req.URL.Path, "/v1/oauth2/token") {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(bytes.NewBufferString(`{"access_token":"tok_abc","expires_in":3600}`)),
+					Header:     make(http.Header),
+				}, nil
+			}
+			rawBody, _ := io.ReadAll(req.Body)
+			var decoded map[string]interface{}
+			_ = json.Unmarshal(rawBody, &decoded)
+			capturedPaths = append(capturedPaths, req.URL.Path)
+			capturedBodies = append(capturedBodies, decoded)
+			return &http.Response{
+				StatusCode: http.StatusCreated,
+				Body:       io.NopCloser(bytes.NewBufferString(`{"id":"PP_CREATED_1","status":"CREATED"}`)),
+				Header:     make(http.Header),
+			}, nil
+		}),
+	}
+
+	adapter := adapters.NewPayPalSandboxAdapter("https://api-m.sandbox.paypal.com", "cid", "csec", mockHTTPClient, nil)
+
+	orderContract := sharedmodels.CapabilityContract{
+		CapabilityID:     "paypal.orders.create",
+		HTTPMethod:       "POST",
+		EndpointPath:     "/v2/checkout/orders",
+		ParametersSchema: json.RawMessage(`{"type":"object","required":["currency_code","items"],"properties":{"currency_code":{"type":"string"},"items":{"type":"array"}}}`),
+	}
+	if _, _, err := adapter.ExecuteCapability(ctx, orderContract, "idem_ord_1", map[string]interface{}{
+		"amount_usd": 75.0,
+		"item_name":  "DelTix Consulting",
+	}); err != nil {
+		t.Fatalf("orders.create failed: %v", err)
+	}
+
+	invoiceContract := sharedmodels.CapabilityContract{
+		CapabilityID:     "paypal.invoice.create",
+		HTTPMethod:       "POST",
+		EndpointPath:     "/v2/invoicing/invoices",
+		ParametersSchema: json.RawMessage(`{"type":"object","properties":{"detail":{"type":"object"},"items":{"type":"array"}}}`),
+	}
+	if _, _, err := adapter.ExecuteCapability(ctx, invoiceContract, "idem_inv_1", map[string]interface{}{
+		"amount_usd":     42.5,
+		"customer_email": "buyer@example.com",
+		"item_name":      "Audit Retainer",
+	}); err != nil {
+		t.Fatalf("invoice.create failed: %v", err)
+	}
+
+	if len(capturedBodies) != 2 {
+		t.Fatalf("expected 2 PayPal API requests, got %d", len(capturedBodies))
+	}
+	if capturedPaths[0] != "/v2/checkout/orders" || capturedBodies[0]["intent"] != "CAPTURE" {
+		t.Fatalf("unexpected orders.create payload: path=%s body=%v", capturedPaths[0], capturedBodies[0])
+	}
+	pu, _ := capturedBodies[0]["purchase_units"].([]interface{})
+	if len(pu) != 1 {
+		t.Fatalf("expected 1 purchase_unit in orders.create, got %v", capturedBodies[0])
+	}
+	if capturedPaths[1] != "/v2/invoicing/invoices" || capturedBodies[1]["detail"] == nil || capturedBodies[1]["primary_recipients"] == nil {
+		t.Fatalf("unexpected invoice.create payload: path=%s body=%v", capturedPaths[1], capturedBodies[1])
 	}
 }

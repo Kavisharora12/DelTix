@@ -11,6 +11,7 @@ import (
 
 	runtimemodels "github.com/deltix/agent-runtime-service/models"
 	"github.com/deltix/agent-runtime-service/services"
+	sharedmodels "github.com/deltix/shared/models"
 )
 
 type RuntimeHandler struct {
@@ -151,8 +152,8 @@ func (h *RuntimeHandler) HandleStreamRun(w http.ResponseWriter, r *http.Request)
 
 		// Stream new checkpoints
 		for _, cp := range detail.Checkpoints {
-			if !seenCheckpoints[cp.ID] {
-				seenCheckpoints[cp.ID] = true
+			if !seenCheckpoints[cp.CheckpointID] {
+				seenCheckpoints[cp.CheckpointID] = true
 				payload, _ := json.Marshal(cp)
 				_, _ = fmt.Fprintf(w, "event: checkpoint\ndata: %s\n\n", string(payload))
 			}
@@ -165,11 +166,7 @@ func (h *RuntimeHandler) HandleStreamRun(w http.ResponseWriter, r *http.Request)
 
 		// If terminal or paused for human approval, terminate the stream cleanly
 		status := detail.Run.Status
-		if status == runtimemodels.RunStatusSucceeded ||
-			status == runtimemodels.RunStatusFailed ||
-			status == runtimemodels.RunStatusPausedForApproval ||
-			status == runtimemodels.RunStatusRejected ||
-			status == runtimemodels.RunStatusCancelled {
+		if status.IsTerminal() || status == sharedmodels.RunStatusPausedForApproval {
 			return
 		}
 
