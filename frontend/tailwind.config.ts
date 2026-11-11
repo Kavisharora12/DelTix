@@ -1,0 +1,175 @@
+import type { Config } from "tailwindcss";
+
+const config: Config = {
+  darkMode: ["class"],
+  content: [
+    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
+    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        // App Semantic Tokens mapped to CSS variables
+        app: "var(--app-bg)",
+        panel: "var(--panel-bg)",
+        raised: "var(--raised-bg)",
+        hover: "var(--hover-bg)",
+        "border-subtle": "var(--border-subtle)",
+        "border-strong": "var(--border-strong)",
+        "text-primary": "var(--text-primary)",
+        "text-secondary": "var(--text-secondary)",
+        "text-tertiary": "var(--text-tertiary)",
+
+        // Status Tokens
+        success: {
+          DEFAULT: "var(--green9)",
+          text: "var(--green11)",
+          fill: "var(--green3)",
+          border: "var(--green6)",
+        },
+        warning: {
+          DEFAULT: "var(--amber9)",
+          text: "var(--amber11)",
+          fill: "var(--amber3)",
+          border: "var(--amber6)",
+        },
+        danger: {
+          DEFAULT: "var(--red9)",
+          text: "var(--red11)",
+          fill: "var(--red3)",
+          border: "var(--red6)",
+        },
+        info: {
+          DEFAULT: "var(--blue9)",
+          text: "var(--blue11)",
+          fill: "var(--blue3)",
+          border: "var(--blue6)",
+        },
+
+        // Full Radix Scales as CSS variables
+        slate: {
+          1: "var(--slate1)",
+          2: "var(--slate2)",
+          3: "var(--slate3)",
+          4: "var(--slate4)",
+          5: "var(--slate5)",
+          6: "var(--slate6)",
+          7: "var(--slate7)",
+          8: "var(--slate8)",
+          9: "var(--slate9)",
+          10: "var(--slate10)",
+          11: "var(--slate11)",
+          12: "var(--slate12)",
+        },
+        green: {
+          1: "var(--green1)",
+          2: "var(--green2)",
+          3: "var(--green3)",
+          4: "var(--green4)",
+          5: "var(--green5)",
+          6: "var(--green6)",
+          7: "var(--green7)",
+          8: "var(--green8)",
+          9: "var(--green9)",
+          10: "var(--green10)",
+          11: "var(--green11)",
+          12: "var(--green12)",
+        },
+        amber: {
+          1: "var(--amber1)",
+          2: "var(--amber2)",
+          3: "var(--amber3)",
+          4: "var(--amber4)",
+          5: "var(--amber5)",
+          6: "var(--amber6)",
+          7: "var(--amber7)",
+          8: "var(--amber8)",
+          9: "var(--amber9)",
+          10: "var(--amber10)",
+          11: "var(--amber11)",
+          12: "var(--amber12)",
+        },
+        red: {
+          1: "var(--red1)",
+          2: "var(--red2)",
+          3: "var(--red3)",
+          4: "var(--red4)",
+          5: "var(--red5)",
+          6: "var(--red6)",
+          7: "var(--red7)",
+          8: "var(--red8)",
+          9: "var(--red9)",
+          10: "var(--red10)",
+          11: "var(--red11)",
+          12: "var(--red12)",
+        },
+        blue: {
+          1: "var(--blue1)",
+          2: "var(--blue2)",
+          3: "var(--blue3)",
+          4: "var(--blue4)",
+          5: "var(--blue5)",
+          6: "var(--blue6)",
+          7: "var(--blue7)",
+          8: "var(--blue8)",
+          9: "var(--blue9)",
+          10: "var(--blue10)",
+          11: "var(--blue11)",
+          12: "var(--blue12)",
+        },
+        purple: {
+          1: "#141124",
+          2: "#1c1735",
+          3: "#281f4c",
+          6: "#4f3b89",
+          9: "#8e4ec6",
+          11: "#c084fc",
+          12: "#f3e8ff",
+        },
+      },
+      fontSize: {
+        ui: ["13px", { lineHeight: "1.45" }],
+        "ui-sm": ["12px", { lineHeight: "1.45" }],
+        "ui-xs": ["11px", { lineHeight: "1.4" }],
+        "title-page": ["20px", { lineHeight: "1.25", letterSpacing: "-0.01em", fontWeight: "600" }],
+        "title-section": ["14px", { lineHeight: "1.3", letterSpacing: "-0.01em", fontWeight: "600" }],
+      },
+      fontFamily: {
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "'Segoe UI'", "Roboto", "sans-serif"],
+        mono: ["'JetBrains Mono'", "'SF Mono'", "Consolas", "'Liberation Mono'", "Menlo", "Courier", "monospace"],
+      },
+      borderRadius: {
+        badge: "4px",
+        btn: "6px",
+        panel: "8px",
+      },
+      boxShadow: {
+        floating: "0 8px 24px rgba(0,0,0,0.35)",
+        card: "0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.12)",
+        none: "none",
+      },
+      keyframes: {
+        float: {
+          "0%, 100%": { transform: "translateY(0)" },
+          "50%": { transform: "translateY(-6px)" },
+        },
+        "pulse-slow": {
+          "0%, 100%": { opacity: "1" },
+          "50%": { opacity: "0.5" },
+        },
+      },
+      animation: {
+        float: "float 3s ease-in-out infinite",
+        "pulse-slow": "pulse-slow 4s ease-in-out infinite",
+      },
+      transitionDuration: {
+        fast: "120ms",
+        sheet: "160ms",
+      },
+    },
+  },
+  plugins: [],
+};
+
+export default config;

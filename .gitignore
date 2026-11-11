@@ -85,6 +85,7 @@ obj/
 .next/
 .nuxt/
 .cache/
+*.tsbuildinfo
 
 ## Java
 *.class
