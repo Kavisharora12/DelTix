@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/deltix/capability-policy-service/adapters"
@@ -297,22 +298,60 @@ func (r *PostgresCapabilityRepository) RecordAuditEvent(
 }
 
 type CapabilityService struct {
-	repo     CapabilityRepository
-	provider adapters.PayPalProvider
+	repo       CapabilityRepository
+	provider   adapters.PayPalProvider
+	hmacSecret []byte
 }
 
 func NewCapabilityService(
 	repo CapabilityRepository,
 	provider adapters.PayPalProvider,
+	hmacSecret ...string,
 ) *CapabilityService {
+	var secret []byte
+	if len(hmacSecret) > 0 && hmacSecret[0] != "" {
+		secret = []byte(hmacSecret[0])
+	}
 	return &CapabilityService{
-		repo:     repo,
-		provider: provider,
+		repo:       repo,
+		provider:   provider,
+		hmacSecret: secret,
 	}
 }
 
 func (s *CapabilityService) ListCapabilities(ctx context.Context) ([]sharedmodels.CapabilityContract, error) {
 	return s.repo.ListActiveCapabilities(ctx)
+}
+
+func (s *CapabilityService) verifyApprovalToken(token string) bool {
+	if !strings.HasPrefix(token, "atok_") {
+		return false
+	}
+	hexPart := strings.TrimPrefix(token, "atok_")
+	if len(hexPart) < 16 {
+		return false
+	}
+	_, err := hex.DecodeString(hexPart)
+	return err == nil
+}
+
+type timeoutable interface {
+	Timeout() bool
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var t timeoutable
+	if errors.As(err, &t) && t.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "client.timeout")
 }
 
 func (s *CapabilityService) DispatchTool(
@@ -331,8 +370,14 @@ func (s *CapabilityService) DispatchTool(
 		return nil, capmodels.ErrUnknownCapability
 	}
 
-	if capContract.IsSensitive && req.ApprovalToken == "" {
-		return nil, capmodels.ErrMissingApprovalToken
+	if capContract.IsSensitive {
+		trimmedToken := strings.TrimSpace(req.ApprovalToken)
+		if trimmedToken == "" {
+			return nil, capmodels.ErrMissingApprovalToken
+		}
+		if len(s.hmacSecret) > 0 && !s.verifyApprovalToken(trimmedToken) {
+			return nil, capmodels.ErrInvalidApprovalToken
+		}
 	}
 
 	idemKey := req.IdempotencyKey
@@ -370,11 +415,19 @@ func (s *CapabilityService) DispatchTool(
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	_ = s.repo.CreateActionIntent(ctx, intent)
+	// Fail-closed rule: If action intent persistence fails, do NOT proceed with payment mutation
+	if err := s.repo.CreateActionIntent(ctx, intent); err != nil {
+		return nil, fmt.Errorf("failed to record action intent prior to execution: %w", err)
+	}
 
 	out, resourceID, err := s.provider.ExecuteCapability(ctx, capContract, idemKey, req.Parameters)
 	if err != nil {
-		intent.Status = sharedmodels.IntentStatusFailed
+		// Rule §8: On timeout, mark status as UNKNOWN_NEEDS_RECONCILIATION, never FAILED
+		if isTimeoutError(err) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			intent.Status = sharedmodels.IntentStatusNeedsReconciliation
+		} else {
+			intent.Status = sharedmodels.IntentStatusFailed
+		}
 		intent.UpdatedAt = time.Now().UTC()
 		_ = s.repo.UpdateActionIntent(ctx, intent)
 		_ = s.repo.RecordAuditEvent(ctx, sharedmodels.AuditEvent{
@@ -384,7 +437,7 @@ func (s *CapabilityService) DispatchTool(
 			ActorID:        "runtime_worker",
 			EventType:      sharedmodels.AuditEventToolFailed,
 			CapabilityID:   req.CapabilityID,
-			PolicyDecision: "DENIED_OR_FAILED",
+			PolicyDecision: string(intent.Status),
 			CreatedAt:      time.Now().UTC(),
 		})
 		return nil, err

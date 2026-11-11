@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from concurrent import futures
+import json
+import os
 from typing import Any
+
+import grpc
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -81,16 +87,11 @@ def create_worker_app(
             base_url=resolved_cfg.capability_policy_service_url,
             timeout_seconds=resolved_cfg.http_timeout_seconds,
         )
-        tool_dispatcher: ToolDispatcherProtocol
-        if resolved_cfg.paypal_client_id and resolved_cfg.paypal_client_secret:
-            tool_dispatcher = PayPalAgentToolkitDispatcher(
-                client_id=resolved_cfg.paypal_client_id,
-                client_secret=resolved_cfg.paypal_client_secret,
-                sandbox=resolved_cfg.paypal_sandbox,
-                fallback_http_dispatcher=http_dispatcher,
-            )
-        else:
-            tool_dispatcher = http_dispatcher
+        # Financial Safety & Policy Invariant (Rule §2 & Rule §8):
+        # All tool executions MUST route through Capability & Policy Service (:8084)
+        # to guarantee pre-mutation intent recording, fail-closed policy checks,
+        # idempotency locking, and cryptographic audit hashing before real money moves.
+        tool_dispatcher: ToolDispatcherProtocol = http_dispatcher
 
         memory_client = HTTPMemoryClient(
             base_url=resolved_cfg.memory_service_url,
@@ -204,10 +205,6 @@ def _to_worker_response(state: dict[str, Any]) -> WorkerExecutionResponse:
         final_state=snapshot,
     )
 
-
-import asyncio
-from concurrent import futures
-import grpc
 
 try:
     from api import runtime_pb2, runtime_pb2_grpc
