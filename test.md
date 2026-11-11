@@ -18,7 +18,7 @@ All **7 runnable services** in the workspace now have multi-stage Dockerfiles an
 | 6 | `capability-policy-service` | [backend/capability-policy-service/Dockerfile](./backend/capability-policy-service/Dockerfile) | `expose: 8084` (Bridge only) | `wget http://localhost:8084/healthz` | — | Dockerized |
 | 7 | `agent-runtime-worker` | [backend/agent-runtime-service/worker/Dockerfile](./backend/agent-runtime-service/worker/Dockerfile) | `expose: 8085` (Bridge only) | `curl -f http://localhost:8085/healthz` | capability, memory (`service_healthy`) | Dockerized |
 
-*(Note: `backend/shared` is a library module imported during Go builds; `frontend/landing` is static HTML excluded via `.dockerignore`; root `.dockerignore` keeps `node_modules` and `.env` out of backend build contexts.)*
+*(Note: `backend/shared` is a library module imported during Go builds; root `.dockerignore` keeps `node_modules` and `.env` out of backend build contexts.)*
 
 ### Compose Bring-Up & Bridge Isolation Tests
 | Test ID | Check | Command / Action | Expected Result | Synced Bug |
