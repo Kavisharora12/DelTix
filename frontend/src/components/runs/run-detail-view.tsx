@@ -34,7 +34,7 @@ interface RunDetailViewProps {
 export function RunDetailView({ run }: RunDetailViewProps) {
   const [activeTab, setActiveTab] = useState<"graph" | "timeline" | "checkpoints" | "policy" | "raw">("graph");
   const [copiedId, setCopiedId] = useState(false);
-  const { rejectRun } = useDelTixStore();
+  const { rejectRun, retryRunFromCheckpoint } = useDelTixStore();
 
   const handleCopyId = () => {
     navigator.clipboard.writeText(run.id);
@@ -142,7 +142,8 @@ export function RunDetailView({ run }: RunDetailViewProps) {
               <Button
                 variant="secondary"
                 size="sm"
-                className="flex items-center gap-1.5"
+                onClick={() => retryRunFromCheckpoint(run.id)}
+                className="flex items-center gap-1.5 hover:border-slate-7 text-slate-12"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span>Retry from checkpoint</span>
@@ -232,7 +233,12 @@ export function RunDetailView({ run }: RunDetailViewProps) {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {activeTab === "graph" && <GraphView run={run} />}
         {activeTab === "timeline" && <TimelineView timeline={run.timeline} />}
-        {activeTab === "checkpoints" && <CheckpointsView checkpoints={run.checkpoints} />}
+        {activeTab === "checkpoints" && (
+          <CheckpointsView
+            checkpoints={run.checkpoints}
+            onRetryFromCheckpoint={() => retryRunFromCheckpoint(run.id)}
+          />
+        )}
         {activeTab === "policy" && <PolicyView evaluations={run.policyEvaluations} />}
         {activeTab === "raw" && <RawView run={run} />}
       </div>

@@ -9,10 +9,18 @@ import { useDelTixStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 export default function AgentsPage() {
-  const { agents } = useDelTixStore();
+  const { agents, createAgent } = useDelTixStore();
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(agents[0]?.id || null);
+  const [bannerMessage, setBannerMessage] = useState<string | null>(null);
 
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) || agents[0];
+
+  const handleCreateAgent = () => {
+    const created = createAgent();
+    setSelectedAgentId(created.id);
+    setBannerMessage(`Created draft agent ${created.name} and loaded template into Studio`);
+    setTimeout(() => setBannerMessage(null), 3500);
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-app select-none">
@@ -26,7 +34,12 @@ export default function AgentsPage() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="primary" size="sm">
+          {bannerMessage && (
+            <span className="text-ui-xs text-green-11 bg-green-3 border border-green-6 px-2.5 py-1 rounded-btn animate-in fade-in-0 font-medium">
+              {bannerMessage}
+            </span>
+          )}
+          <Button variant="primary" size="sm" onClick={handleCreateAgent} className="font-semibold shadow-sm">
             + New Agent Graph
           </Button>
         </div>

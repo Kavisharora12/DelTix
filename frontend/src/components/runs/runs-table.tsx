@@ -28,13 +28,19 @@ interface RunsTableProps {
 
 export function RunsTable({ runs }: RunsTableProps) {
   const router = useRouter();
-  const { setSelectedRunId } = useDelTixStore();
+  const { setSelectedRunId, createRunFromAgent, agents } = useDelTixStore();
 
   const [activeTab, setActiveTab] = useState<"all" | "approval" | "failed">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedAgent, setSelectedAgent] = useState<string>("all");
   const [selectedRowIndex, setSelectedRowIndex] = useState<number>(0);
   const [peekRun, setPeekRun] = useState<RunItem | null>(null);
+
+  const handleTriggerRun = () => {
+    const newRun = createRunFromAgent(agents[0]?.id || "agent_payables");
+    setSelectedRunId(newRun.id);
+    router.push(`/runs/${newRun.id}`);
+  };
 
   // Filter runs based on tab, query, and agent
   const filteredRuns = useMemo(() => {
@@ -159,6 +165,18 @@ export function RunsTable({ runs }: RunsTableProps) {
               </option>
             ))}
           </select>
+
+          {/* Trigger Test Run Button */}
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleTriggerRun}
+            className="h-8 font-semibold shadow-sm flex items-center gap-1.5"
+            title="Dispatch simulated invoice run to DAG runtime"
+          >
+            <Play className="h-3 w-3 fill-current" />
+            <span>Trigger Test Run</span>
+          </Button>
         </div>
       </div>
 

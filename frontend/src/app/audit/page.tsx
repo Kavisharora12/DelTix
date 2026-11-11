@@ -15,6 +15,17 @@ export default function AuditPage() {
     setTimeout(() => setCopiedHash(null), 1500);
   };
 
+  const handleExportAudit = () => {
+    const jsonStr = JSON.stringify(logs, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `deltix-audit-trail-${new Date().toISOString().split("T")[0]}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-app select-none">
       {/* Header */}
@@ -26,7 +37,13 @@ export default function AuditPage() {
           </p>
         </div>
 
-        <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleExportAudit}
+          className="flex items-center gap-1.5 hover:border-slate-7 text-slate-12"
+          title="Export immutable audit trail as JSON"
+        >
           <Download className="h-3.5 w-3.5" />
           <span>Export Audit Log</span>
         </Button>

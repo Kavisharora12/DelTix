@@ -72,7 +72,33 @@ const INITIAL_POLICIES: PolicyRule[] = [
 ];
 
 export default function PoliciesPage() {
-  const [policies] = useState<PolicyRule[]>(INITIAL_POLICIES);
+  const [policies, setPolicies] = useState<PolicyRule[]>(INITIAL_POLICIES);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [ruleName, setRuleName] = useState("");
+  const [expression, setExpression] = useState("");
+  const [threshold, setThreshold] = useState("");
+  const [action, setAction] = useState<"REQUIRE_HUMAN_APPROVAL" | "REJECT_RUN" | "CIRCUIT_BREAK">("REQUIRE_HUMAN_APPROVAL");
+
+  const handleCreatePolicy = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ruleName.trim() || !expression.trim()) return;
+
+    const newRule: PolicyRule = {
+      id: `pol_${Date.now()}`,
+      name: ruleName.trim().toLowerCase().replace(/\s+/g, "_"),
+      scope: "tool_dispatch",
+      expression: expression.trim(),
+      actionOnViolation: action,
+      currentLimit: threshold.trim() || "Configured",
+      status: "active",
+    };
+
+    setPolicies([newRule, ...policies]);
+    setIsModalOpen(false);
+    setRuleName("");
+    setExpression("");
+    setThreshold("");
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-app select-none">
@@ -85,11 +111,116 @@ export default function PoliciesPage() {
           </p>
         </div>
 
-        <Button variant="primary" size="sm" className="flex items-center gap-1.5">
+        <Button
+          variant="primary"
+          size="sm"
+          onClick={() => setIsModalOpen(true)}
+          className="flex items-center gap-1.5 font-semibold shadow-sm"
+        >
           <Plus className="h-3.5 w-3.5" />
           <span>New Policy Rule</span>
         </Button>
       </div>
+
+      {/* New Policy Modal */}
+      {isModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-in fade-in-0"
+          onClick={() => setIsModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg bg-panel border border-slate-5 rounded-panel p-5 space-y-4 shadow-floating"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-5 pb-3">
+              <h3 className="text-title-section text-slate-12 font-semibold">
+                Add Deterministic Policy Guard
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-10 hover:text-slate-12 p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCreatePolicy} className="space-y-3.5 text-ui">
+              <div>
+                <label className="text-ui-xs font-medium text-slate-11 block mb-1">
+                  Policy Name
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. max_single_transaction_cap"
+                  value={ruleName}
+                  onChange={(e) => setRuleName(e.target.value)}
+                  className="w-full h-8 px-2.5 bg-slate-3 border border-slate-5 rounded-btn text-slate-12 focus:outline-none focus:border-blue-9"
+                />
+              </div>
+
+              <div>
+                <label className="text-ui-xs font-medium text-slate-11 block mb-1">
+                  Deterministic Python Expression (AST Evaluated)
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. amount_usd <= 1000.00"
+                  value={expression}
+                  onChange={(e) => setExpression(e.target.value)}
+                  className="w-full h-8 px-2.5 bg-slate-3 border border-slate-5 rounded-btn font-mono text-ui-xs text-slate-12 focus:outline-none focus:border-blue-9"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-ui-xs font-medium text-slate-11 block mb-1">
+                    Threshold Description
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. $1,000.00 max"
+                    value={threshold}
+                    onChange={(e) => setThreshold(e.target.value)}
+                    className="w-full h-8 px-2.5 bg-slate-3 border border-slate-5 rounded-btn text-slate-12 focus:outline-none focus:border-blue-9"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-ui-xs font-medium text-slate-11 block mb-1">
+                    Action on Exceed
+                  </label>
+                  <select
+                    value={action}
+                    onChange={(e) => setAction(e.target.value as any)}
+                    className="w-full h-8 px-2 bg-slate-3 border border-slate-5 rounded-btn text-slate-12 focus:outline-none focus:border-blue-9"
+                  >
+                    <option value="REQUIRE_HUMAN_APPROVAL">Require Human Approval</option>
+                    <option value="REJECT_RUN">Reject Run</option>
+                    <option value="CIRCUIT_BREAK">Trigger Circuit Breaker</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-5">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setIsModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" size="sm" className="font-semibold">
+                  Create Policy Rule
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Policies Table */}
       <div className="flex-1 overflow-auto bg-app">

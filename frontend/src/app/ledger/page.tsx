@@ -9,6 +9,23 @@ import { Button } from "@/components/ui/button";
 export default function LedgerPage() {
   const [entries] = useState(MOCK_LEDGER_ENTRIES);
 
+  const handleExportCSV = () => {
+    const headers = "Reference,Counterparty,Amount_USD,Currency,Disbursement_Method,Idempotency_Key,Status,Timestamp\n";
+    const rows = entries
+      .map(
+        (e) =>
+          `"${e.referenceId}","${e.counterparty}",${(e.amountCents / 100).toFixed(2)},"${e.currency}","${e.disbursementMethod}","${e.idempotencyKey}","${e.reconciliationStatus}","${e.timestamp}"`
+      )
+      .join("\n");
+    const blob = new Blob([headers + rows], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `deltix-reconciliation-${new Date().toISOString().split("T")[0]}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-app select-none">
       {/* Header */}
@@ -20,7 +37,13 @@ export default function LedgerPage() {
           </p>
         </div>
 
-        <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={handleExportCSV}
+          className="flex items-center gap-1.5 hover:border-slate-7 text-slate-12"
+          title="Export CSV reconciliation ledger"
+        >
           <Download className="h-3.5 w-3.5" />
           <span>Export Reconciliation CSV</span>
         </Button>

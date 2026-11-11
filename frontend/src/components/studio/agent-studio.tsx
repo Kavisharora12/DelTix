@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   AlertTriangle,
@@ -14,6 +15,7 @@ import {
 } from "lucide-react";
 import { AgentItem } from "@/types";
 import { Button } from "@/components/ui/button";
+import { useDelTixStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 interface Diagnostic {
@@ -50,13 +52,27 @@ interface AgentStudioProps {
 }
 
 export function AgentStudio({ agent, onSave }: AgentStudioProps) {
+  const router = useRouter();
+  const { createRunFromAgent, publishAgentVersion } = useDelTixStore();
   const [yamlContent, setYamlContent] = useState(agent.definitionYaml);
   const [activeTab, setActiveTab] = useState<"definition" | "ir">("definition");
   const [diagnostics, setDiagnostics] = useState<Diagnostic[]>(SAMPLE_DIAGNOSTICS);
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<Diagnostic | null>(null);
+  const [publishFeedback, setPublishFeedback] = useState<string | null>(null);
 
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
   const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
+
+  const handleRunSandbox = () => {
+    const newRun = createRunFromAgent(agent.id);
+    router.push(`/runs/${newRun.id}`);
+  };
+
+  const handlePublish = () => {
+    publishAgentVersion(agent.id);
+    setPublishFeedback(`Published version successfully!`);
+    setTimeout(() => setPublishFeedback(null), 3500);
+  };
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-app select-none">
@@ -207,7 +223,19 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
+          {publishFeedback && (
+            <span className="text-ui-xs text-green-11 bg-green-3 border border-green-6 px-2.5 py-1 rounded-btn font-medium">
+              {publishFeedback}
+            </span>
+          )}
+
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleRunSandbox}
+            className="flex items-center gap-1.5"
+            title="Execute compiled graph in sandbox runtime"
+          >
             <Play className="h-3.5 w-3.5" />
             <span>Run in sandbox</span>
           </Button>
@@ -215,8 +243,9 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
           <Button
             variant="primary"
             size="sm"
+            onClick={handlePublish}
             disabled={errorCount > 0}
-            className="flex items-center gap-1.5"
+            className="flex items-center gap-1.5 font-semibold"
           >
             <Upload className="h-3.5 w-3.5" />
             <span>Publish version</span>
