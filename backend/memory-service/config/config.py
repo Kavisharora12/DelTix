@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import os
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 try:
     from dotenv import load_dotenv
@@ -73,9 +73,26 @@ class MemoryConfig:
 
 def _parse_database_url(url: str) -> dict[str, str | int]:
     """Parse PostgreSQL connection string (Supabase / Neon / standard pgvector)."""
-    if not url:
+    if not url or "[YOUR-PASSWORD]" in url:
         return {}
-    parsed = urlparse(url)
+
+    sanitized_url = url
+    if "://" in url and "@" in url:
+        scheme, rest = url.split("://", 1)
+        user_info, host_and_path = rest.rsplit("@", 1)
+        if ":" in user_info:
+            raw_user, raw_pass = user_info.split(":", 1)
+            if raw_pass.startswith("[") and raw_pass.endswith("]") and len(raw_pass) >= 2:
+                raw_pass = raw_pass[1:-1]
+            safe_user = quote(unquote(raw_user), safe="")
+            safe_pass = quote(unquote(raw_pass), safe="")
+            sanitized_url = f"{scheme}://{safe_user}:{safe_pass}@{host_and_path}"
+
+    try:
+        parsed = urlparse(sanitized_url)
+    except ValueError:
+        return {}
+
     result: dict[str, str | int] = {}
     if parsed.hostname:
         result["host"] = parsed.hostname

@@ -207,11 +207,22 @@ class MemoryService:
             metadata={"tenant_id": tenant_id, "agent_id": agent_id},
         )
         self._invalidate_tenant_cache(tenant_id)
-        return [
+        items = [
             item
             for raw in _memories_from_result(result)
             if (item := _to_memory_item(raw)) is not None
         ]
+        if not items and isinstance(result, dict) and result.get("event_id"):
+            last_msg = safe_messages[-1]["content"] if safe_messages else ""
+            items = [
+                MemoryItem(
+                    id=str(result["event_id"]),
+                    text=last_msg,
+                    score=None,
+                    created_at=datetime.now(timezone.utc),
+                )
+            ]
+        return items
 
     def retrieve(
         self, tenant_id: str, agent_id: str, query: str, limit: int | None = None
@@ -228,21 +239,20 @@ class MemoryService:
         try:
             result = self._memory.search(
                 query,
-                filters={
-                    "user_id": tenant_id,
-                    "agent_id": agent_id,
-                    "tenant_id": tenant_id,
-                },
-                top_k=requested_limit,
-                threshold=self._similarity_threshold,
+                filters={"user_id": tenant_id},
             )
-        except TypeError:
-            result = self._memory.search(
-                query,
-                user_id=tenant_id,
-                agent_id=agent_id,
-                limit=requested_limit,
-            )
+        except Exception:
+            try:
+                result = self._memory.search(
+                    query,
+                    filters={"user_id": tenant_id, "agent_id": agent_id},
+                )
+            except Exception:
+                try:
+                    result = self._memory.search(query, user_id=tenant_id)
+                except Exception as exc:
+                    logger.warning("Memory search query failed: %s", exc)
+                    result = []
         memories: list[MemoryItem] = []
         for raw in _memories_from_result(result):
             item = _to_memory_item(raw)

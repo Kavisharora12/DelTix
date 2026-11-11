@@ -42,7 +42,7 @@ USER deltix
 
 EXPOSE 8085
 
-HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=5 \
     CMD curl -f http://localhost:8085/healthz || exit 1
 
 ENTRYPOINT ["python", "main.py"]

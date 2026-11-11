@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-from concurrent import futures
-import json
-import os
 from typing import Any
 
 import grpc
@@ -108,7 +104,7 @@ def create_worker_app(
     )
 
     @app.get("/healthz")
-    async def healthz() -> dict[str, Any]:
+    def healthz() -> dict[str, Any]:
         return {
             "status": "ok",
             "service": "agent-runtime-worker",

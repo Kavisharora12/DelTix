@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -74,9 +75,14 @@ type GoogleAuthConfig struct {
 
 func LoadPostgresConfigFromEnv() (PostgresConfig, error) {
 	LoadDotEnvFiles()
-	dbURL := os.Getenv("SUPABASE_DB_URL")
-	if dbURL == "" {
+	rawURL := strings.TrimSpace(os.Getenv("SUPABASE_DB_URL"))
+	if rawURL == "" {
 		return PostgresConfig{}, ErrMissingDatabaseURL
+	}
+
+	dbURL, err := normalizeDatabaseURL(rawURL)
+	if err != nil {
+		return PostgresConfig{}, err
 	}
 
 	maxConns, err := parseEnvInt32("SUPABASE_DB_MAX_CONNS", 15)
@@ -151,4 +157,53 @@ func parseEnvInt32(key string, fallback int32) (int32, error) {
 		return 0, err
 	}
 	return int32(parsed), nil
+}
+
+// normalizeDatabaseURL cleans and URL-encodes the userinfo portion of a PostgreSQL connection URI.
+// It handles accidental square brackets around the password (e.g. [my_pass] copied from Supabase UI)
+// as well as special characters (@, #, ?, :, [, ]) in raw passwords.
+func normalizeDatabaseURL(raw string) (string, error) {
+	if strings.Contains(raw, "[YOUR-PASSWORD]") {
+		return "", errors.New("SUPABASE_DB_URL still contains the placeholder [YOUR-PASSWORD] — replace [YOUR-PASSWORD] (and remove the square brackets) with your real Supabase database password in .env")
+	}
+
+	schemeIdx := strings.Index(raw, "://")
+	if schemeIdx <= 0 {
+		return raw, nil
+	}
+	scheme := raw[:schemeIdx]
+	rest := raw[schemeIdx+3:]
+
+	// Find where the host/path boundary starts (first '/' or '?' after @)
+	atIdx := strings.LastIndex(rest, "@")
+	if atIdx <= 0 {
+		return raw, nil
+	}
+
+	userInfo := rest[:atIdx]
+	hostAndPath := rest[atIdx+1:]
+
+	colonIdx := strings.IndexByte(userInfo, ':')
+	if colonIdx < 0 {
+		return raw, nil
+	}
+
+	username := userInfo[:colonIdx]
+	password := userInfo[colonIdx+1:]
+
+	// If the user kept Supabase's square brackets around their password (e.g. [secret123]), strip them.
+	if len(password) >= 2 && strings.HasPrefix(password, "[") && strings.HasSuffix(password, "]") {
+		password = password[1 : len(password)-1]
+	}
+
+	// If password was already percent-encoded, unescape first so we don't double-encode.
+	if unescaped, err := url.PathUnescape(password); err == nil {
+		password = unescaped
+	}
+	if unescapedUser, err := url.PathUnescape(username); err == nil {
+		username = unescapedUser
+	}
+
+	encodedUserInfo := url.UserPassword(username, password).String()
+	return fmt.Sprintf("%s://%s@%s", scheme, encodedUserInfo, hostAndPath), nil
 }

@@ -129,7 +129,7 @@ func NewGeminiIRSynthesizer(
 		models = config.DefaultGeminiModels
 	}
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 30 * time.Second}
+		httpClient = &http.Client{Timeout: 90 * time.Second}
 	}
 	return &GeminiIRSynthesizer{
 		apiKey:     apiKey,
@@ -263,21 +263,100 @@ func buildGeminiCompilerPrompts(
 	clarifJSON, _ := json.Marshal(req.Clarifications)
 
 	systemPrompt := fmt.Sprintf(`You are the DelTix Deterministic Financial AI Agent Compiler powered by Google Gemini.
-Your job is to compile a user's natural language request into a JSON object matching LLMSynthesisOutput:
+Your job is to compile a user's natural language request into a strictly valid JSON object matching LLMSynthesisOutput:
 {
   "needs_clarification": boolean,
-  "clarification_questions": [{"field": string, "question": string, "why_required": string, "suggestions": [string]}],
-  "agent_ir": AgentIR (v1.0.0)
+  "clarification_questions": [
+    {
+      "field": string,
+      "question": string,
+      "why_required": string,
+      "suggestions": [string]
+    }
+  ],
+  "agent_ir": {
+    "ir_version": "1.0.0",
+    "agent_id": %q,
+    "tenant_id": %q,
+    "metadata": {
+      "name": %q,
+      "description": string,
+      "category": %q,
+      "author": %q
+    },
+    "inputs": {
+      "<param_name>": {
+        "type": "string" | "number" | "boolean" | "object" | "array",
+        "description": string,
+        "required": boolean
+      }
+    },
+    "outputs": {
+      "<output_name>": {
+        "type": "string" | "number" | "boolean" | "object" | "array",
+        "description": string
+      }
+    },
+    "capabilities": [
+      {
+        "capability_id": string,
+        "version": string,
+        "is_mutation": boolean,
+        "is_sensitive": boolean,
+        "allowed_actions": [string]
+      }
+    ],
+    "policies": {
+      "read_only": boolean,
+      "max_budget_usd": number,
+      "require_human_approval": boolean
+    },
+    "memory": {
+      "enable_semantic_memory": boolean,
+      "memory_namespace": string,
+      "max_retrieval_k": integer,
+      "state_keys_to_persist": [string]
+    },
+    "execution_limits": {
+      "max_steps": integer,
+      "timeout_seconds": integer,
+      "max_loop_iterations": integer,
+      "max_consecutive_errors": integer
+    },
+    "nodes": [
+      {
+        "id": string,
+        "type": "TOOL_EXECUTION" | "LLM_REASONING" | "CONDITIONAL_ROUTER" | "HUMAN_APPROVAL" | "DETERMINISTIC_PROCESS" | "MEMORY_UPDATE" | "MEMORY_RETRIEVAL",
+        "description": string,
+        "payload": {
+          "capability_id": string,
+          "prompt_template": string,
+          "expression": string
+        }
+      }
+    ],
+    "transitions": [
+      {
+        "from_node": string,
+        "to_node": string,
+        "is_default": boolean,
+        "condition_expression": string
+      }
+    ]
+  }
 }
 Rules:
-1. Only use capabilities from the active Supabase capability_registry: %s
-2. If the prompt requests a money-moving mutation (is_mutation=true) and "max_budget_usd" is missing from clarifications, set "needs_clarification": true and ask for "max_budget_usd".
-3. If the prompt requests a sensitive capability (is_sensitive=true) and "require_human_approval" is missing from clarifications, set "needs_clarification": true and ask for "require_human_approval".
-4. When compiling agent_ir:
-   - Set ir_version="1.0.0", agent_id=%q, tenant_id=%q, metadata.author=%q.
-   - Include a terminal sink node (0 outgoing transitions) reachable from the entry node.
-   - Only include MEMORY_RETRIEVAL / MEMORY_UPDATE nodes when long-term semantic memory (Mem0) is relevant.`,
-		string(capsJSON), agentID, tenantID, userID,
+1. Active capabilities available in registry: %s
+2. ONLY set "needs_clarification": true if "Clarifications" is empty ({}) AND critical policy/threshold constraints are missing from both the Prompt and Clarifications. Whenever non-empty "Clarifications" are supplied, you MUST set "needs_clarification": false, "clarification_questions": [], and synthesize a complete, valid "agent_ir".
+3. When synthesizing agent_ir:
+   - "metadata": populate name, category, author, and description accurately based on the user's intent.
+   - "inputs": derive required input parameters from the user's workflow.
+   - "capabilities": declare every capability used by the nodes.
+   - "policies": enforce safety constraints (if all nodes use read-only tools and read_only is true, set max_budget_usd to 0; if max_budget_usd > 0, set read_only to false).
+   - "execution_limits": realistic bounds (e.g. max_steps between 5 and 50, timeout_seconds between 10 and 300).
+   - "nodes": construct an executable graph with an entry node, intermediate processing/tool steps, and a terminal sink node (0 outgoing transitions). Never put JavaScript or multi-line code in payload.expression (use payload.prompt_template for LLM_REASONING, payload.capability_id for TOOL_EXECUTION, or leave expression empty for pass-through DETERMINISTIC_PROCESS nodes).
+   - "transitions": connect nodes deterministically with simple variable comparison condition_expression (e.g. "amount_usd < 50") or default routes.`,
+		agentID, tenantID, req.Name, req.Category, userID, string(capsJSON),
 	)
 
 	userPrompt := fmt.Sprintf(
@@ -318,7 +397,7 @@ func (r *PostgresSpecRepository) SaveCompiledSpec(ctx context.Context, spec shar
 		INSERT INTO agent_specs (
 			spec_id, agent_id, version, tenant_id, name, category,
 			ir_payload, validation_report, readiness_token, status, created_by
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULLIF($11, ''))
+		) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, NULLIF($11, ''))
 	`
 	_, err = r.pool.Exec(
 		ctx,
@@ -329,8 +408,8 @@ func (r *PostgresSpecRepository) SaveCompiledSpec(ctx context.Context, spec shar
 		spec.TenantID,
 		spec.Name,
 		spec.Category,
-		irBytes,
-		reportBytes,
+		string(irBytes),
+		string(reportBytes),
 		spec.ReadinessToken,
 		string(spec.Status),
 		spec.CreatedBy,
@@ -356,7 +435,7 @@ func (r *PostgresSpecRepository) RecordCompilationLog(ctx context.Context, entry
 		INSERT INTO agent_compilation_logs (
 			log_id, tenant_id, spec_id, raw_prompt, clarification_payload,
 			compiler_stage, status, diagnostics
-		) VALUES ($1, $2, NULLIF($3, ''), $4, $5, $6, $7, $8)
+		) VALUES ($1, $2, NULLIF($3, ''), $4, $5::jsonb, $6, $7, $8::jsonb)
 	`
 	_, err = r.pool.Exec(
 		ctx,
@@ -365,10 +444,10 @@ func (r *PostgresSpecRepository) RecordCompilationLog(ctx context.Context, entry
 		entry.TenantID,
 		entry.SpecID,
 		entry.RawPrompt,
-		clarifBytes,
+		string(clarifBytes),
 		entry.CompilerStage,
 		entry.Status,
-		diagBytes,
+		string(diagBytes),
 	)
 	if err != nil {
 		return fmt.Errorf("insert agent_compilation_logs row: %w", err)
@@ -529,8 +608,11 @@ func (s *CompilerService) Compile(
 		return compilermodels.CompileResponse{}, fmt.Errorf("synthesize agent ir: %w", err)
 	}
 
-	// Guardrail 1: If clarification is required, log to Supabase agent_compilation_logs and return questions
-	if llmOut.NeedsClarification || len(llmOut.ClarificationQuestions) > 0 {
+	// Guardrail 1: If clarification is genuinely required (or Gemini returned no AgentIR), log and return questions.
+	// If clarifications were already provided and Gemini synthesized a valid AgentIR alongside advisory notes, proceed to validation.
+	needsClarification := (len(req.Clarifications) == 0 && (llmOut.NeedsClarification || len(llmOut.ClarificationQuestions) > 0)) ||
+		(llmOut.NeedsClarification && llmOut.AgentIR == nil)
+	if needsClarification {
 		_ = s.recordLog(ctx, CompilationLogEntry{
 			LogID:                s.idGenerator("log"),
 			TenantID:             tenantID,
@@ -552,14 +634,19 @@ func (s *CompilerService) Compile(
 	}
 
 	ir := *llmOut.AgentIR
-	ir.AgentID = agentID
-	ir.TenantID = tenantID
-	if ir.Metadata.CreatedAt.IsZero() {
-		ir.Metadata.CreatedAt = s.nowUTC()
-	}
+	hydrateCompiledIR(&ir, agentID, tenantID, userID, req, activeCaps, s.nowUTC)
 
 	// Guardrails 2-7: Deterministic Schema, Topology, Capability Registry, Policy & Graph Walk Verification
 	report, tests := s.validator.ValidateAndTestIR(ctx, ir)
+	if len(report.Errors) > 0 || report.TestsPassed < report.TestsRun {
+		// One self-healing repair pass feeding exact validation diagnostics back into synthesis.
+		if repairedOut, repairErr := s.attemptIRRepair(ctx, tenantID, userID, agentID, req, activeCaps, ir, report.Errors); repairErr == nil && repairedOut.AgentIR != nil {
+			repairedIR := *repairedOut.AgentIR
+			hydrateCompiledIR(&repairedIR, agentID, tenantID, userID, req, activeCaps, s.nowUTC)
+			repairedReport, repairedTests := s.validator.ValidateAndTestIR(ctx, repairedIR)
+			ir, report, tests = repairedIR, repairedReport, repairedTests
+		}
+	}
 	if len(report.Errors) > 0 || report.TestsPassed < report.TestsRun {
 		_ = s.recordLog(ctx, CompilationLogEntry{
 			LogID:                s.idGenerator("log"),
@@ -668,4 +755,81 @@ func generatePrefixedID(prefix string) string {
 		return fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
 	}
 	return fmt.Sprintf("%s_%s", prefix, hex.EncodeToString(b))
+}
+
+func hydrateCompiledIR(
+	ir *sharedmodels.AgentIR,
+	agentID string,
+	tenantID string,
+	userID string,
+	req compilermodels.CompileRequest,
+	activeCaps []CapabilityMetadata,
+	nowUTC func() time.Time,
+) {
+	ir.AgentID = agentID
+	ir.TenantID = tenantID
+	if strings.TrimSpace(ir.Metadata.Name) == "" {
+		ir.Metadata.Name = req.Name
+	}
+	if strings.TrimSpace(ir.Metadata.Category) == "" {
+		ir.Metadata.Category = req.Category
+	}
+	if strings.TrimSpace(ir.Metadata.Author) == "" {
+		ir.Metadata.Author = userID
+	}
+	if ir.Metadata.CreatedAt.IsZero() {
+		ir.Metadata.CreatedAt = nowUTC()
+	}
+	if ir.ExecutionLimits.MaxSteps <= 0 {
+		ir.ExecutionLimits.MaxSteps = 20
+	}
+	if ir.ExecutionLimits.TimeoutSeconds <= 0 {
+		ir.ExecutionLimits.TimeoutSeconds = 60
+	}
+	if ir.ExecutionLimits.MaxLoopIterations <= 0 {
+		ir.ExecutionLimits.MaxLoopIterations = 3
+	}
+	if ir.ExecutionLimits.MaxConsecutiveErrors <= 0 {
+		ir.ExecutionLimits.MaxConsecutiveErrors = 3
+	}
+
+	// Read-only agents with zero mutating tools must keep max_budget_usd = 0 so policy schema remains consistent.
+	capByID := make(map[string]CapabilityMetadata, len(activeCaps))
+	for _, c := range activeCaps {
+		capByID[c.CapabilityID] = c
+	}
+	hasMutationTool := false
+	for _, n := range ir.Nodes {
+		if n.Type != sharedmodels.NodeTypeToolExecution {
+			continue
+		}
+		if meta, ok := capByID[n.Payload.CapabilityID]; ok && (meta.IsMutation || meta.IsSensitive) {
+			hasMutationTool = true
+			break
+		}
+	}
+	if ir.Policies.ReadOnly && !hasMutationTool {
+		ir.Policies.MaxBudgetUSD = 0
+	}
+}
+
+func (s *CompilerService) attemptIRRepair(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+	agentID string,
+	req compilermodels.CompileRequest,
+	activeCaps []CapabilityMetadata,
+	brokenIR sharedmodels.AgentIR,
+	validationErrors []string,
+) (LLMSynthesisOutput, error) {
+	irJSON, _ := json.Marshal(brokenIR)
+	repairReq := req
+	repairReq.NaturalLanguagePrompt = fmt.Sprintf(
+		"%s\n\n[COMPILER_REPAIR_REQUIRED]\nPrevious AgentIR failed validation with errors: %v\nPrevious AgentIR: %s\nFix ALL validation errors above and return needs_clarification=false with a strictly valid agent_ir.",
+		req.NaturalLanguagePrompt,
+		validationErrors,
+		string(irJSON),
+	)
+	return s.synthesizer.Synthesize(ctx, tenantID, userID, agentID, repairReq, activeCaps)
 }

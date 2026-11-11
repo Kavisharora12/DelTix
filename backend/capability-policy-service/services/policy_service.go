@@ -114,7 +114,7 @@ func (r *PostgresApprovalRepository) RecordAuditEvent(
 		INSERT INTO audit_events (
 			event_id, run_id, tenant_id, actor_id, event_type,
 			capability_id, policy_decision, metadata, created_at
-		) VALUES ($1, NULLIF($2, ''), $3, $4, $5, NULLIF($6, ''), $7, $8, $9)
+		) VALUES ($1, NULLIF($2, ''), $3, $4, $5, NULLIF($6, ''), $7, $8::jsonb, $9)
 	`
 	_, err := r.pool.Exec(
 		ctx,

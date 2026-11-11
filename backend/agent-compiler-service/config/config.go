@@ -19,9 +19,9 @@ var (
 var DefaultGeminiModels = []string{
 	"gemini-2.5-flash",
 	"gemini-2.5-pro",
-	"gemini-2.0-flash",
-	"gemini-2.0-flash-lite",
-	"gemini-1.5-flash",
+	"gemini-flash-latest",
+	"gemini-flash-lite-latest",
+	"gemini-pro-latest",
 }
 
 type CompilerConfig struct {
@@ -64,8 +64,8 @@ func LoadCompilerConfigFromEnv() (CompilerConfig, error) {
 
 	return CompilerConfig{
 		HTTPPort:            getEnvOrDefault("COMPILER_HTTP_PORT", "8081"),
-		ReadTimeout:         15 * time.Second,
-		WriteTimeout:        45 * time.Second,
+		ReadTimeout:         60 * time.Second,
+		WriteTimeout:        120 * time.Second,
 		ReadinessHMACSecret: hmacSecret,
 		GeminiAPIKey:        geminiKey,
 		GeminiModels:        parseGeminiModels(os.Getenv("GEMINI_MODELS")),

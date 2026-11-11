@@ -464,11 +464,16 @@ class DynamicLangGraphEngine:
                         )
 
                     # Deterministic Runtime Guardrail 2: Budget Cap Enforcement
-                    requested_amount = float(
+                    raw_amount = (
                         variables.get("amount_usd")
-                        or state["inputs"].get("amount_usd")
-                        or 0.0
+                        if variables.get("amount_usd") is not None
+                        else state["inputs"].get("amount_usd")
+                        if state["inputs"].get("amount_usd") is not None
+                        else variables.get("amount")
+                        if variables.get("amount") is not None
+                        else state["inputs"].get("amount")
                     )
+                    requested_amount = float(raw_amount or 0.0)
                     if not read_only_policy and max_budget_usd > 0:
                         if cumulative_spend + requested_amount > max_budget_usd:
                             raise PermissionError(
@@ -531,24 +536,30 @@ class DynamicLangGraphEngine:
                 elif node_type in ("CONDITIONAL_ROUTER", "DETERMINISTIC_PROCESS"):
                     expr = str(payload.get("expression") or "").strip()
                     static_out = payload.get("static_output") or {}
+                    computed_proc = False
                     if expr:
-                        target_var = str(
-                            payload.get("target_variable") or "computed_value"
-                        ).strip()
-                        merged_ctx = {**state["inputs"], **variables}
-                        computed_val = evaluate_math_expression(expr, merged_ctx)
-                        proc_out = {
-                            target_var: computed_val,
-                            "deterministic_math_verified": True,
-                        }
-                        variables.update(proc_out)
-                        _apply_output_mapping(variables, proc_out, output_mapping)
-                        node_output = proc_out
-                    elif isinstance(static_out, dict) and static_out:
-                        variables.update(static_out)
-                        node_output = dict(static_out)
-                    else:
-                        node_output = {"node_id": node_id, "status": "ok"}
+                        try:
+                            target_var = str(
+                                payload.get("target_variable") or "computed_value"
+                            ).strip()
+                            merged_ctx = {**state["inputs"], **variables}
+                            computed_val = evaluate_math_expression(expr, merged_ctx)
+                            proc_out = {
+                                target_var: computed_val,
+                                "deterministic_math_verified": True,
+                            }
+                            variables.update(proc_out)
+                            _apply_output_mapping(variables, proc_out, output_mapping)
+                            node_output = proc_out
+                            computed_proc = True
+                        except (SyntaxError, ValueError, TypeError):
+                            computed_proc = False
+                    if not computed_proc:
+                        if isinstance(static_out, dict) and static_out:
+                            variables.update(static_out)
+                            node_output = dict(static_out)
+                        else:
+                            node_output = {"node_id": node_id, "status": "ok"}
 
                 duration_ms = int((time.perf_counter() - start_ts) * 1000)
                 checkpoints.append(

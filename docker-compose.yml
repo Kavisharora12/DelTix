@@ -108,6 +108,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      RUNTIME_SERVICE_URL: http://agent-runtime-service:8082
     ports:
       - "127.0.0.1:8084:8084"
     networks:

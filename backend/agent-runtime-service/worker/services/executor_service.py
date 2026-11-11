@@ -39,11 +39,40 @@ try:
     from paypal_agent_toolkit.shared.configuration import Configuration, Context
 except ImportError:  # pragma: no cover
     try:
-        from paypal_agent_toolkit import PayPalToolkit  # type: ignore[no-redef]
+        from paypal_agent_toolkit.shared.api import PayPalAPI
+        from paypal_agent_toolkit.shared.configuration import Configuration, Context, is_tool_allowed
+        from paypal_agent_toolkit.shared.tools import tools as _pp_tools
+
+        class _SharedPayPalTool:
+            def __init__(self, tool_def: dict[str, Any], paypal_api: Any) -> None:
+                self.name = tool_def["method"]
+                self.description = tool_def.get("description", "")
+                self.args_schema = tool_def.get("args_schema")
+                self._api = paypal_api
+
+            def invoke(self, params: dict[str, Any]) -> str:
+                return self._api.run(self.name, params)
+
+        class PayPalToolkit:  # type: ignore[no-redef]
+            """Compatibility wrapper over paypal_agent_toolkit.shared when legacy langchain.tools is absent."""
+
+            def __init__(self, client_id: str, secret: str, configuration: Any) -> None:
+                self.configuration = configuration
+                self._paypal_api = PayPalAPI(
+                    client_id=client_id, secret=secret, context=configuration.context
+                )
+                self._tools = [
+                    _SharedPayPalTool(tool_def, self._paypal_api)
+                    for tool_def in _pp_tools
+                    if is_tool_allowed(tool_def, configuration)
+                ]
+
+            def get_tools(self) -> list[_SharedPayPalTool]:
+                return self._tools
     except ImportError:
         PayPalToolkit = None  # type: ignore[assignment,misc]
-    Configuration = None  # type: ignore[assignment,misc]
-    Context = None  # type: ignore[assignment,misc]
+        Configuration = None  # type: ignore[assignment,misc]
+        Context = None  # type: ignore[assignment,misc]
 
 try:
     from langsmith import traceable
@@ -171,10 +200,8 @@ class LangChainGeminiCascade(LLMReasonerProtocol):
     ) -> dict[str, Any]:
         """Tries each Gemini model in order, skipping models that hit their sliding-window limit or 429."""
         errors: list[str] = []
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
+        combined_prompt = f"{system_prompt}\n\n{user_prompt}".strip() if system_prompt else user_prompt
+        messages = [HumanMessage(content=combined_prompt)]
 
         for model_name in self._models:
             if not self._limiter.allow(model_name):
@@ -280,7 +307,10 @@ class HTTPToolDispatcher(ToolDispatcherProtocol):
                     "PayPal-Request-Id": idempotency_key,
                 },
             )
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise RuntimeError(
+                    f"capability dispatch HTTP {resp.status_code}: {resp.text}"
+                )
             return resp.json()
 
 
@@ -326,16 +356,88 @@ def build_paypal_toolkit_actions(
         resource = "_".join(parts[:-1])
         action = parts[-1]
 
+    resource_aliases = {
+        "invoice": "invoices",
+        "order": "orders",
+        "product": "products",
+        "subscription": "subscriptions",
+        "subscription_plan": "subscriptionPlans",
+        "subscription_plans": "subscriptionPlans",
+        "subscriptionplan": "subscriptionPlans",
+        "subscriptionplans": "subscriptionPlans",
+    }
+    action_aliases = {
+        "sendreminder": "sendReminder",
+        "send_reminder": "sendReminder",
+        "generateqrc": "generateQRC",
+        "generate_qrc": "generateQRC",
+    }
+    resource = resource_aliases.get(resource.lower(), resource)
+    action = action_aliases.get(action.lower(), action)
+
     # Normalize common PayPal Agent Toolkit action aliases
     if resource == "captures" and action == "refund":
         resource = "orders"
-    if read_only and action.lower() not in ("get", "list"):
+    if read_only and action.lower() not in ("get", "list", "show", "search"):
         raise PermissionError(
             f"READ_ONLY_POLICY_VIOLATION: cannot enable mutating PayPal Toolkit action '{resource}.{action}'"
         )
 
     actions_dict = {resource: {action: True}}
     return resource, action, actions_dict
+
+
+def normalize_paypal_toolkit_input(
+    resource: str,
+    action: str,
+    parameters: dict[str, Any],
+) -> dict[str, Any]:
+    """Maps flat DelTix workflow inputs into PayPal Agent Toolkit structured payloads when omitted."""
+    out = dict(parameters)
+    raw_amount = out.get("amount_usd") if out.get("amount_usd") is not None else out.get("amount")
+    try:
+        amount = round(float(raw_amount), 2) if raw_amount is not None else 0.0
+    except (TypeError, ValueError):
+        amount = 0.0
+
+    item_name = str(
+        out.get("description")
+        or out.get("invoice_id")
+        or out.get("item_name")
+        or "DelTix Service"
+    )
+
+    if resource == "orders" and action == "create":
+        if not out.get("currency_code"):
+            out["currency_code"] = "USD"
+        if not out.get("items") and amount > 0:
+            out["items"] = [
+                {
+                    "name": item_name,
+                    "quantity": 1,
+                    "item_cost": amount,
+                    "item_total": amount,
+                }
+            ]
+    elif resource == "invoices" and action == "create":
+        currency = str(out.get("currency_code") or out.get("currency") or "USD").upper()
+        if not out.get("detail"):
+            out["detail"] = {"currency_code": currency}
+        email = out.get("recipient_email") or out.get("customer_email")
+        if not out.get("primary_recipients") and email:
+            out["primary_recipients"] = [{"billing_info": {"email_address": str(email)}}]
+        if not out.get("items") and amount > 0:
+            out["items"] = [
+                {
+                    "name": item_name,
+                    "quantity": "1",
+                    "unit_amount": {
+                        "currency_code": currency,
+                        "value": f"{amount:.2f}",
+                    },
+                }
+            ]
+    return out
 
 
 class PayPalAgentToolkitDispatcher(ToolDispatcherProtocol):
@@ -408,6 +510,16 @@ class PayPalAgentToolkitDispatcher(ToolDispatcherProtocol):
         toolkit = self._create_toolkit(actions_dict)
         tools = list(toolkit.get_tools() or [])
         if not tools:
+            if self._fallback is not None:
+                return await self._fallback.dispatch_tool(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    step_index=step_index,
+                    capability_id=capability_id,
+                    operation=operation,
+                    parameters=parameters,
+                    approval_token=approval_token,
+                )
             raise RuntimeError(
                 f"PAYPAL_TOOLKIT_EMPTY: no LangChain tools returned for actions={actions_dict}"
             )
@@ -418,6 +530,11 @@ class PayPalAgentToolkitDispatcher(ToolDispatcherProtocol):
             for k, v in parameters.items()
             if not str(k).startswith("_")
         }
+        tool_input = normalize_paypal_toolkit_input(resource, action, tool_input)
+        args_schema = getattr(selected_tool, "args_schema", None)
+        schema_fields = getattr(args_schema, "model_fields", None) or getattr(args_schema, "__fields__", None)
+        if isinstance(schema_fields, dict) and schema_fields:
+            tool_input = {k: v for k, v in tool_input.items() if k in schema_fields}
 
         if hasattr(selected_tool, "ainvoke"):
             raw_res = await selected_tool.ainvoke(tool_input)
@@ -464,7 +581,7 @@ def _match_paypal_langchain_tool(
 class HTTPMemoryClient(MemoryClientProtocol):
     """HTTP client for Mem0 Memory Service (:8083) with graceful degradation."""
 
-    def __init__(self, base_url: str, timeout_seconds: float = 5.0) -> None:
+    def __init__(self, base_url: str, timeout_seconds: float = 15.0) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout_seconds
 
@@ -479,15 +596,15 @@ class HTTPMemoryClient(MemoryClientProtocol):
     ) -> tuple[list[dict[str, Any]], bool]:
         """Retrieves scoped semantic memories; degrades gracefully (degraded=True) if unreachable."""
         try:
+            bounded_limit = max(1, min(100, int(top_k)))
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
-                    f"{self._base_url}/internal/v1/memories/retrieve",
-                    headers={"X-Tenant-ID": tenant_id},
+                    f"{self._base_url}/internal/v1/memories/search",
                     json={
                         "tenant_id": tenant_id,
                         "agent_id": agent_id,
                         "query": query,
-                        "limit": top_k,
+                        "top_k": top_k,
                     },
                 )
                 resp.raise_for_status()
@@ -509,14 +626,13 @@ class HTTPMemoryClient(MemoryClientProtocol):
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
-                    f"{self._base_url}/internal/v1/memories/store",
-                    headers={"X-Tenant-ID": tenant_id},
+                    f"{self._base_url}/internal/v1/memories/add",
                     json={
                         "tenant_id": tenant_id,
                         "agent_id": agent_id,
-                        "messages": [
-                            {"role": "user", "content": content}
-                        ],
+                        "namespace": namespace,
+                        "content": content,
+                        "metadata": metadata,
                     },
                 )
                 return resp.status_code < 300

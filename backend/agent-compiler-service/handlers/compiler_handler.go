@@ -66,7 +66,7 @@ func (h *CompilerHandler) HandleCompile(w http.ResponseWriter, r *http.Request) 
 			writeProblemJSON(w, http.StatusBadRequest, "EMPTY_PROMPT", err.Error(), traceID)
 			return
 		}
-		writeProblemJSON(w, http.StatusInternalServerError, "COMPILATION_ERROR", "Internal error during agent compilation.", traceID)
+		writeProblemJSON(w, http.StatusInternalServerError, "COMPILATION_ERROR", err.Error(), traceID)
 		return
 	}
 

@@ -200,10 +200,26 @@ func (a *PayPalSandboxAdapter) dispatchDynamicRESTCall(
 	}
 
 	// 2. Build remaining parameters for query string (GET/DELETE) or JSON body (POST/PUT/PATCH)
+	allowedProps := extractSchemaProperties(contract.ParametersSchema)
 	bodyParams := make(map[string]interface{})
 	for k, v := range parameters {
-		if !consumedKeys[k] {
+		if consumedKeys[k] {
+			continue
+		}
+		if k == "paypal_payload" || len(allowedProps) == 0 || allowedProps[k] ||
+			(allowedProps["amount"] && (k == "amount_usd" || k == "currency_code" || k == "intent")) {
 			bodyParams[k] = v
+		}
+	}
+
+	// PayPal Reporting Transaction Search requires ISO-8601 start_date and end_date within a 31-day window.
+	if contract.CapabilityID == "paypal.transaction.search" || endpointTemplate == "/v1/reporting/transactions" {
+		now := time.Now().UTC()
+		if v, ok := bodyParams["end_date"]; !ok || strings.TrimSpace(fmt.Sprintf("%v", v)) == "" {
+			bodyParams["end_date"] = now.Format(time.RFC3339)
+		}
+		if v, ok := bodyParams["start_date"]; !ok || strings.TrimSpace(fmt.Sprintf("%v", v)) == "" {
+			bodyParams["start_date"] = now.Add(-7 * 24 * time.Hour).Format(time.RFC3339)
 		}
 	}
 
@@ -303,4 +319,22 @@ func buildPayPalRequestBody(bodyParams map[string]interface{}) ([]byte, error) {
 		return json.Marshal(payload)
 	}
 	return json.Marshal(bodyParams)
+}
+
+func extractSchemaProperties(schemaRaw json.RawMessage) map[string]bool {
+	trimmed := bytes.TrimSpace(schemaRaw)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("{}")) {
+		return nil
+	}
+	var parsed struct {
+		Properties map[string]interface{} `json:"properties"`
+	}
+	if err := json.Unmarshal(trimmed, &parsed); err != nil || len(parsed.Properties) == 0 {
+		return nil
+	}
+	allowed := make(map[string]bool, len(parsed.Properties))
+	for k := range parsed.Properties {
+		allowed[k] = true
+	}
+	return allowed
 }

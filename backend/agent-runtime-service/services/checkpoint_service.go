@@ -116,7 +116,7 @@ func (r *PostgresRunStateRepository) CreateRun(ctx context.Context, run sharedmo
 			run_id, spec_id, tenant_id, triggered_by, status,
 			current_step_index, current_node_id, cumulative_spend,
 			inputs_payload, state_payload, started_at, updated_at
-		) VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9, $10, $11, $12)
+		) VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8, $9::jsonb, $10::jsonb, $11, $12)
 	`
 	_, err := r.pool.Exec(
 		ctx,
@@ -129,8 +129,8 @@ func (r *PostgresRunStateRepository) CreateRun(ctx context.Context, run sharedmo
 		run.CurrentStepIndex,
 		run.CurrentNodeID,
 		run.CumulativeSpend,
-		defaultJSON(run.InputsPayload),
-		defaultJSON(run.StatePayload),
+		string(defaultJSON(run.InputsPayload)),
+		string(defaultJSON(run.StatePayload)),
 		run.StartedAt,
 		run.UpdatedAt,
 	)
@@ -144,8 +144,8 @@ func (r *PostgresRunStateRepository) UpdateRunProgress(ctx context.Context, run 
 		    current_step_index = $4,
 		    current_node_id = $5,
 		    cumulative_spend = $6,
-		    state_payload = $7,
-		    final_output = $8,
+		    state_payload = $7::jsonb,
+		    final_output = $8::jsonb,
 		    error_message = NULLIF($9, ''),
 		    updated_at = $10,
 		    completed_at = $11
@@ -160,7 +160,7 @@ func (r *PostgresRunStateRepository) UpdateRunProgress(ctx context.Context, run 
 		run.CurrentStepIndex,
 		run.CurrentNodeID,
 		run.CumulativeSpend,
-		defaultJSON(run.StatePayload),
+		string(defaultJSON(run.StatePayload)),
 		nullableJSON(run.FinalOutput),
 		run.ErrorMessage,
 		run.UpdatedAt,
@@ -278,7 +278,7 @@ func (r *PostgresRunStateRepository) SaveCheckpoint(
 			checkpoint_id, run_id, tenant_id, step_index, attempt_num,
 			node_id, node_type, node_input, node_output, state_snapshot,
 			status, duration_ms, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11, $12, $13)
 		ON CONFLICT (run_id, step_index, attempt_num) DO UPDATE SET
 			node_output = EXCLUDED.node_output,
 			state_snapshot = EXCLUDED.state_snapshot,
@@ -295,9 +295,9 @@ func (r *PostgresRunStateRepository) SaveCheckpoint(
 		maxInt(1, cp.AttemptNum),
 		cp.NodeID,
 		string(cp.NodeType),
-		defaultJSON(cp.NodeInput),
-		defaultJSON(cp.NodeOutput),
-		defaultJSON(cp.StateSnapshot),
+		string(defaultJSON(cp.NodeInput)),
+		string(defaultJSON(cp.NodeOutput)),
+		string(defaultJSON(cp.StateSnapshot)),
 		string(cp.Status),
 		cp.DurationMs,
 		cp.CreatedAt,
@@ -359,7 +359,7 @@ func (r *PostgresRunStateRepository) CreateApprovalRequest(
 			approval_id, run_id, tenant_id, step_index, node_id,
 			capability_id, action_summary, requested_payload, amount_usd,
 			status, token_hash, created_at, expires_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11, $12, $13)
 	`
 	_, err := r.pool.Exec(
 		ctx,
@@ -371,7 +371,7 @@ func (r *PostgresRunStateRepository) CreateApprovalRequest(
 		req.NodeID,
 		req.CapabilityID,
 		req.ActionSummary,
-		defaultJSON(req.RequestedPayload),
+		string(defaultJSON(req.RequestedPayload)),
 		req.AmountUSD,
 		string(req.Status),
 		req.TokenHash,
@@ -420,18 +420,19 @@ func (r *PostgresRunStateRepository) GetPendingApprovalForRun(
 	return &req, nil
 }
 
-func defaultJSON(raw json.RawMessage) []byte {
+func defaultJSON(raw json.RawMessage) json.RawMessage {
 	if len(raw) == 0 {
-		return []byte("{}")
+		return json.RawMessage("{}")
 	}
 	return raw
 }
 
-func nullableJSON(raw json.RawMessage) []byte {
+func nullableJSON(raw json.RawMessage) *string {
 	if len(raw) == 0 {
 		return nil
 	}
-	return raw
+	s := string(raw)
+	return &s
 }
 
 func maxInt(a, b int) int {

@@ -46,7 +46,7 @@ func (r *PostgresCapabilityRepository) UpsertCapability(
 			parameters_schema, output_schema, is_sensitive, is_mutation,
 			idempotent, timeout_seconds, max_retries, required_permissions,
 			status, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		ON CONFLICT (capability_id, version) DO UPDATE SET
 			description = EXCLUDED.description,
 			http_method = EXCLUDED.http_method,
@@ -224,7 +224,7 @@ func (r *PostgresCapabilityRepository) CreateActionIntent(
 		INSERT INTO action_intents (
 			intent_id, run_id, tenant_id, step_index, capability_id,
 			idempotency_key, amount_usd, request_payload, status, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10, $11)
 	`
 	_, err := r.pool.Exec(
 		ctx,
@@ -250,7 +250,7 @@ func (r *PostgresCapabilityRepository) UpdateActionIntent(
 ) error {
 	const updateSQL = `
 		UPDATE action_intents
-		SET response_payload = $2,
+		SET response_payload = $2::jsonb,
 		    provider_resource_id = $3,
 		    status = $4,
 		    updated_at = $5
@@ -277,7 +277,7 @@ func (r *PostgresCapabilityRepository) RecordAuditEvent(
 			event_id, run_id, tenant_id, actor_id, event_type,
 			capability_id, policy_decision, request_digest, response_digest,
 			metadata, created_at
-		) VALUES ($1, NULLIF($2, ''), $3, $4, $5, NULLIF($6, ''), $7, $8, $9, $10, $11)
+		) VALUES ($1, NULLIF($2, ''), $3, $4, $5, NULLIF($6, ''), $7, $8, $9, $10::jsonb, $11)
 	`
 	_, err := r.pool.Exec(
 		ctx,
@@ -464,11 +464,11 @@ func (s *CapabilityService) DispatchTool(
 	return out, nil
 }
 
-func defaultJSON(raw json.RawMessage) []byte {
+func defaultJSON(raw json.RawMessage) string {
 	if len(raw) == 0 {
-		return []byte("{}")
+		return "{}"
 	}
-	return raw
+	return string(raw)
 }
 
 func generateID(prefix string) string {

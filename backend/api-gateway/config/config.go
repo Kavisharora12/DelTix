@@ -64,8 +64,8 @@ func LoadGatewayConfigFromEnv() (GatewayConfig, error) {
 
 	return GatewayConfig{
 		HTTPPort:           getEnvOrDefault("GATEWAY_HTTP_PORT", "8080"),
-		ReadTimeout:        15 * time.Second,
-		WriteTimeout:       30 * time.Second,
+		ReadTimeout:        60 * time.Second,
+		WriteTimeout:       120 * time.Second,
 		RateLimitPerMinute: rateLimit,
 		CookieSecure:       os.Getenv("GATEWAY_COOKIE_SECURE") == "true",
 		AllowDevAuth:       allowDevAuth,

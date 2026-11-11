@@ -430,3 +430,85 @@ func TestGeminiSlidingWindowAndModelFallbackCascade(t *testing.T) {
 		t.Fatalf("expected 3 HTTP calls across models (1st: flash, 2nd: pro->429, 3rd: 2.0-flash->200), got %v", modelsCalled)
 	}
 }
+
+func TestCompilerNormalizesReadOnlyBudgetConflict(t *testing.T) {
+	repo := newMockSpecRepo()
+	catalog := newMockCapabilityCatalog()
+	synth := &struct {
+		mockIRSynthesizer
+	}{}
+	_ = synth
+	readOnlyConflictSynth := &conflictPolicySynthesizer{}
+	validator := services.NewValidatorService(catalog)
+	compiler := services.NewCompilerService(repo, catalog, readOnlyConflictSynth, validator, "test_hmac_secret")
+
+	resp, err := compiler.Compile(context.Background(), "ten_1", "usr_1", "trc_ro_1", compilermodels.CompileRequest{
+		Name:                  "Read Only Reviewer",
+		Category:              "PAYPAL_FINANCIAL",
+		NaturalLanguagePrompt: "Inspect PayPal transactions",
+		Clarifications:        map[string]string{"max_budget_usd": "500.00"},
+	})
+	if err != nil {
+		t.Fatalf("Compile failed: %v", err)
+	}
+	if resp.Status != compilermodels.OutcomeReady {
+		t.Fatalf("expected READY after read_only max_budget_usd normalization, got %s (errors=%v)", resp.Status, resp.ValidationReport.Errors)
+	}
+	if resp.AgentIR.Policies.MaxBudgetUSD != 0 {
+		t.Fatalf("expected MaxBudgetUSD=0 for read_only agent, got %.2f", resp.AgentIR.Policies.MaxBudgetUSD)
+	}
+}
+
+type conflictPolicySynthesizer struct{}
+
+func (c *conflictPolicySynthesizer) Synthesize(
+	_ context.Context,
+	tenantID string,
+	userID string,
+	agentID string,
+	req compilermodels.CompileRequest,
+	_ []services.CapabilityMetadata,
+) (services.LLMSynthesisOutput, error) {
+	return services.LLMSynthesisOutput{
+		AgentIR: &sharedmodels.AgentIR{
+			IRVersion: sharedmodels.SupportedIRVersion,
+			AgentID:   agentID,
+			TenantID:  tenantID,
+			Metadata: sharedmodels.IRMetadata{
+				Name:     req.Name,
+				Category: req.Category,
+				Author:   userID,
+			},
+			Capabilities: []sharedmodels.CapabilityRef{
+				{CapabilityID: "paypal.transactions.list", Version: "1.0.0", IsSensitive: false},
+			},
+			Policies: sharedmodels.PolicyConfig{
+				ReadOnly:             true,
+				MaxBudgetUSD:         500.0,
+				RequireHumanApproval: false,
+			},
+			ExecutionLimits: sharedmodels.ExecutionLimits{
+				MaxSteps:             10,
+				TimeoutSeconds:       30,
+				MaxLoopIterations:    1,
+				MaxConsecutiveErrors: 2,
+			},
+			Nodes: []sharedmodels.NodeDefinition{
+				{
+					ID:          "node_list",
+					Type:        sharedmodels.NodeTypeToolExecution,
+					Description: "List transactions",
+					Payload:     sharedmodels.NodePayload{CapabilityID: "paypal.transactions.list"},
+				},
+				{
+					ID:          "node_end",
+					Type:        sharedmodels.NodeTypeDeterministicProcess,
+					Description: "End",
+				},
+			},
+			Transitions: []sharedmodels.TransitionEdge{
+				{FromNode: "node_list", ToNode: "node_end", IsDefault: true},
+			},
+		},
+	}, nil
+}

@@ -530,6 +530,27 @@ class TestDynamicLangGraphWorker(unittest.TestCase):
         self.assertEqual(captured_actions["actions"], {"orders": {"create": True}})
         self.assertTrue(captured_actions["sandbox"])
 
+        # 5. Verify flat workflow inputs are normalized for orders.create and invoices.create schemas
+        from services.executor_service import normalize_paypal_toolkit_input
+
+        norm_order = normalize_paypal_toolkit_input(
+            "orders",
+            "create",
+            {"amount_usd": 75.0, "invoice_id": "INV-2002"},
+        )
+        self.assertEqual(norm_order["currency_code"], "USD")
+        self.assertEqual(norm_order["items"][0]["item_cost"], 75.0)
+        self.assertEqual(norm_order["items"][0]["name"], "INV-2002")
+
+        norm_inv = normalize_paypal_toolkit_input(
+            "invoices",
+            "create",
+            {"amount_usd": 40.0, "customer_email": "buyer@example.com", "invoice_id": "INV-3003"},
+        )
+        self.assertEqual(norm_inv["detail"]["currency_code"], "USD")
+        self.assertEqual(norm_inv["primary_recipients"][0]["billing_info"]["email_address"], "buyer@example.com")
+        self.assertEqual(norm_inv["items"][0]["unit_amount"]["value"], "40.00")
+
     def test_langsmith_config_loading_and_env_propagation(self) -> None:
         import os
         from config.config import load_worker_config_from_env

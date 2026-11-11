@@ -14,8 +14,7 @@ app = create_worker_app()
 if __name__ == "__main__":
     cfg = load_worker_config_from_env()
     uvicorn.run(
-        "main:app",
+        app,
         host="0.0.0.0",
         port=cfg.http_port,
-        reload=False,
     )
