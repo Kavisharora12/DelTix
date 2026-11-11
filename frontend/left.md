@@ -32,7 +32,7 @@
   - **Interactive Clarification Drawer:** When `POST /v1/agents/compile` returns `status: "CLARIFICATION_REQUIRED"` and `clarification_questions[]`, there is **no drawer/modal** to display questions/suggestions, collect user answers (`clarifications`), and re-compile.
   - **Pre-Flight Synthetic Test Scorecard & HMAC Readiness Seal:** `CompileResponse` returns `synthetic_tests[]`, `validation_report`, and `readiness_token`, none of which are rendered as a scorecard panel in `agent-studio.tsx`.
   - **Live Graph Preview & Agent Switching State:** The *Synthesized Node Execution Order* block (`agent-studio.tsx:229-242`) renders hardcoded placeholder steps instead of `compiledIR.nodes`, and `yamlContent` does not reset when selecting a different agent in the left rail.
-  - **API Contract Mismatch:** `api.compilePrompt` (`src/lib/api.ts:352-357`) sends `{ prompt, category }` instead of `{ natural_language_prompt, category }` and reads `resp.ir` instead of `resp.agent_ir`.
+  - **API & Spec Contract Mismatches:** `api.compilePrompt` (`src/lib/api.ts:352-357`) sends `{ prompt, category }` instead of `{ natural_language_prompt, category }` and reads `resp.ir` instead of `resp.agent_ir`. `BackendAgentSpec` (`src/lib/api.ts:25-64`) also expects `ir_payload` (`agent_name`, `capability`) while the backend returns `agent_ir` (`nodes[].payload.capability_id`, `transitions[].from_node`, `transitions[].to_node`).
 
 ---
 
