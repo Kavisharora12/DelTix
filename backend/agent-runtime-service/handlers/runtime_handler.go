@@ -119,27 +119,65 @@ func (h *RuntimeHandler) HandleStreamRun(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	runID := r.PathValue("run_id")
-	detail, err := h.runtimeService.GetRunDetail(r.Context(), tenantID, runID, traceID)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "RUN_NOT_FOUND", err.Error(), traceID)
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "STREAMING_UNSUPPORTED", "streaming not supported by client", traceID)
 		return
 	}
+
+	runID := r.PathValue("run_id")
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	for _, cp := range detail.Checkpoints {
-		payload, _ := json.Marshal(cp)
-		_, _ = fmt.Fprintf(w, "event: checkpoint\ndata: %s\n\n", string(payload))
-	}
+	seenCheckpoints := make(map[string]bool)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 
-	statusPayload, _ := json.Marshal(detail)
-	_, _ = fmt.Fprintf(w, "event: run_status\ndata: %s\n\n", string(statusPayload))
-	if flusher, ok := w.(http.Flusher); ok {
+	for {
+		detail, err := h.runtimeService.GetRunDetail(r.Context(), tenantID, runID, traceID)
+		if err != nil {
+			errPayload, _ := json.Marshal(map[string]string{
+				"code":    "RUN_NOT_FOUND",
+				"message": err.Error(),
+			})
+			_, _ = fmt.Fprintf(w, "event: error\ndata: %s\n\n", string(errPayload))
+			flusher.Flush()
+			return
+		}
+
+		// Stream new checkpoints
+		for _, cp := range detail.Checkpoints {
+			if !seenCheckpoints[cp.ID] {
+				seenCheckpoints[cp.ID] = true
+				payload, _ := json.Marshal(cp)
+				_, _ = fmt.Fprintf(w, "event: checkpoint\ndata: %s\n\n", string(payload))
+			}
+		}
+
+		// Stream current run status
+		statusPayload, _ := json.Marshal(detail)
+		_, _ = fmt.Fprintf(w, "event: run_status\ndata: %s\n\n", string(statusPayload))
 		flusher.Flush()
+
+		// If terminal or paused for human approval, terminate the stream cleanly
+		status := detail.Run.Status
+		if status == runtimemodels.RunStatusSucceeded ||
+			status == runtimemodels.RunStatusFailed ||
+			status == runtimemodels.RunStatusPausedForApproval ||
+			status == runtimemodels.RunStatusRejected ||
+			status == runtimemodels.RunStatusCancelled {
+			return
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-ticker.C:
+		}
 	}
 }
 

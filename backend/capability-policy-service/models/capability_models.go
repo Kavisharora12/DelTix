@@ -11,6 +11,7 @@ var (
 	ErrMissingCapabilityID  = errors.New("capability_id is required")
 	ErrUnknownCapability    = errors.New("capability_id is not registered or active")
 	ErrMissingApprovalToken = errors.New("sensitive capability requires a verified approval_token")
+	ErrInvalidApprovalToken = errors.New("approval_token is invalid or does not match cryptographic signature")
 	ErrInvalidDecision      = errors.New("decision must be APPROVED or REJECTED")
 )
 

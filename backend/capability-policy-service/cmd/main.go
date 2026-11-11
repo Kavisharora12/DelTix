@@ -54,7 +54,7 @@ func run(logger *slog.Logger) error {
 		nil,
 	)
 
-	capService := services.NewCapabilityService(capRepo, paypalAdapter)
+	capService := services.NewCapabilityService(capRepo, paypalAdapter, cfg.ApprovalHMACSecret)
 	resumeNotifier := services.NewHTTPRuntimeResumeNotifier(cfg.RuntimeServiceURL, nil)
 	policyService := services.NewPolicyService(approvalRepo, resumeNotifier, cfg.ApprovalHMACSecret)
 

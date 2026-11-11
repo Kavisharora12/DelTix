@@ -478,17 +478,16 @@ class HTTPMemoryClient(MemoryClientProtocol):
         top_k: int = 5,
     ) -> tuple[list[dict[str, Any]], bool]:
         """Retrieves scoped semantic memories; degrades gracefully (degraded=True) if unreachable."""
-        # TODO(workstream-4): Connect to live Mem0 Memory Service (:8083) once Workstream 4 is running.
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
-                    f"{self._base_url}/internal/v1/memories/search",
+                    f"{self._base_url}/internal/v1/memories/retrieve",
+                    headers={"X-Tenant-ID": tenant_id},
                     json={
                         "tenant_id": tenant_id,
                         "agent_id": agent_id,
-                        "namespace": namespace,
                         "query": query,
-                        "top_k": top_k,
+                        "limit": top_k,
                     },
                 )
                 resp.raise_for_status()
@@ -510,13 +509,14 @@ class HTTPMemoryClient(MemoryClientProtocol):
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 resp = await client.post(
-                    f"{self._base_url}/internal/v1/memories/add",
+                    f"{self._base_url}/internal/v1/memories/store",
+                    headers={"X-Tenant-ID": tenant_id},
                     json={
                         "tenant_id": tenant_id,
                         "agent_id": agent_id,
-                        "namespace": namespace,
-                        "content": content,
-                        "metadata": metadata,
+                        "messages": [
+                            {"role": "user", "content": content}
+                        ],
                     },
                 )
                 return resp.status_code < 300
