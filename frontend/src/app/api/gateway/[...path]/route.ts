@@ -7,7 +7,7 @@ function resolveGatewayBaseUrl(): string {
   const configured =
     process.env.API_GATEWAY_INTERNAL_URL ||
     process.env.BACKEND_GATEWAY_URL ||
-    "http://api-gateway:8080";
+    (process.env.DOCKER ? "http://api-gateway:8080" : "http://localhost:8080");
   return configured.replace(/\/+$/, "");
 }
 
@@ -38,6 +38,17 @@ async function proxyToGateway(
       forwardHeaders.set(key, value);
     }
   });
+
+  // Inject fallback development auth and tenant headers if not present
+  if (!forwardHeaders.has("authorization")) {
+    forwardHeaders.set("authorization", "Bearer dev_token_deltix");
+  }
+  if (!forwardHeaders.has("x-tenant-id")) {
+    forwardHeaders.set("x-tenant-id", "org_prod_442");
+  }
+  if (!forwardHeaders.has("x-user-id")) {
+    forwardHeaders.set("x-user-id", "usr_dev_finance");
+  }
 
   const hasBody = !["GET", "HEAD"].includes(request.method.toUpperCase());
   const body = hasBody ? await request.arrayBuffer() : undefined;

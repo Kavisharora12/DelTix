@@ -95,6 +95,10 @@ export interface RunItem {
   durationMs: number;
   failureReason?: string;
   approvalDetails?: {
+    approvalId?: string;
+    capabilityId?: string;
+    requestedPayload?: Record<string, any>;
+    tokenHash?: string;
     reason: string;
     amountCents: number;
     recipientName: string;
