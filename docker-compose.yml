@@ -6,6 +6,30 @@
 
 services:
   # ---------------------------------------------------------------------------
+  # 0. Frontend Console (:3000) — Calls api-gateway over private bridge network
+  # ---------------------------------------------------------------------------
+  frontend:
+    container_name: deltix-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /api/gateway
+        NEXT_PUBLIC_APP_ENV: SANDBOX
+    restart: unless-stopped
+    env_file:
+      - ./frontend/.env
+    environment:
+      API_GATEWAY_INTERNAL_URL: http://api-gateway:8080
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - deltix-network
+
+  # ---------------------------------------------------------------------------
   # 1. API Gateway (:8080) — Public Entrypoint & Reverse Proxy Hub
   # ---------------------------------------------------------------------------
   api-gateway:
@@ -23,7 +47,7 @@ services:
       CAPABILITY_POLICY_SERVICE_URL: http://capability-policy-service:8084
       MEMORY_SERVICE_URL: http://memory-service:8083
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     depends_on:
       agent-compiler-service:
         condition: service_healthy
@@ -37,7 +61,7 @@ services:
       - deltix-network
 
   # ---------------------------------------------------------------------------
-  # 2. Agent Compiler Service (:8081) — Deterministic IR Synthesis & Validation
+  # 2. Agent Compiler Service (:8081) — Internal Bridge Only
   # ---------------------------------------------------------------------------
   agent-compiler-service:
     container_name: deltix-compiler-service
@@ -47,13 +71,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "127.0.0.1:8081:8081"
+    expose:
+      - "8081"
     networks:
       - deltix-network
 
   # ---------------------------------------------------------------------------
-  # 3. Agent Runtime Service (:8082) — Go Control Plane & Checkpoint Repository
+  # 3. Agent Runtime Service (:8082) — Internal Bridge Only
   # ---------------------------------------------------------------------------
   agent-runtime-service:
     container_name: deltix-runtime-control-plane
@@ -65,8 +89,8 @@ services:
       - .env
     environment:
       WORKER_BRIDGE_URL: http://agent-runtime-worker:8085
-    ports:
-      - "127.0.0.1:8082:8082"
+    expose:
+      - "8082"
     depends_on:
       agent-runtime-worker:
         condition: service_healthy
@@ -74,7 +98,7 @@ services:
       - deltix-network
 
   # ---------------------------------------------------------------------------
-  # 4. Agent Runtime Worker (:8085) — Python LangGraph & Gemini Execution
+  # 4. Agent Runtime Worker (:8085) — Internal Bridge Only
   # ---------------------------------------------------------------------------
   agent-runtime-worker:
     container_name: deltix-runtime-worker
@@ -87,8 +111,8 @@ services:
     environment:
       MEMORY_SERVICE_URL: http://memory-service:8083
       CAPABILITY_POLICY_SERVICE_URL: http://capability-policy-service:8084
-    ports:
-      - "127.0.0.1:8085:8085"
+    expose:
+      - "8085"
     depends_on:
       capability-policy-service:
         condition: service_healthy
@@ -98,7 +122,7 @@ services:
       - deltix-network
 
   # ---------------------------------------------------------------------------
-  # 5. Capability & Policy Service (:8084) — Spend Caps & PayPal Adapter
+  # 5. Capability & Policy Service (:8084) — Internal Bridge Only
   # ---------------------------------------------------------------------------
   capability-policy-service:
     container_name: deltix-capability-policy-service
@@ -110,13 +134,13 @@ services:
       - .env
     environment:
       RUNTIME_SERVICE_URL: http://agent-runtime-service:8082
-    ports:
-      - "127.0.0.1:8084:8084"
+    expose:
+      - "8084"
     networks:
       - deltix-network
 
   # ---------------------------------------------------------------------------
-  # 6. Memory Service (:8083) — Mem0 Semantic Store & pgvector
+  # 6. Memory Service (:8083) — Internal Bridge Only
   # ---------------------------------------------------------------------------
   memory-service:
     container_name: deltix-memory-service
@@ -126,8 +150,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "127.0.0.1:8083:8083"
+    expose:
+      - "8083"
     networks:
       - deltix-network
 

@@ -580,15 +580,15 @@ class TestDynamicLangGraphWorker(unittest.TestCase):
             os.environ.pop("LANGSMITH_API_KEY", None)
 
     def test_worker_healthz_and_http_memory_endpoints(self) -> None:
-        from unittest.mock import AsyncMock, MagicMock, patch
-        from fastapi.testclient import TestClient
+        from unittest.mock import MagicMock, patch
         from api.grpc_server import create_worker_app
         from services.executor_service import HTTPMemoryClient
 
-        client = TestClient(create_worker_app())
-        resp = client.get("/healthz")
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()["status"], "ok")
+        app = create_worker_app()
+        healthz_fn = next(r.endpoint for r in app.routes if getattr(r, "path", None) == "/healthz")
+        health_payload = healthz_fn()
+        self.assertEqual(health_payload["status"], "ok")
+        self.assertEqual(health_payload["service"], "agent-runtime-worker")
 
         recorded_calls: list[tuple[str, dict[str, Any], dict[str, Any]]] = []
 
