@@ -12,10 +12,13 @@ import {
   Code2,
   FileText,
   GitBranch,
+  Sparkles,
+  Loader2,
 } from "lucide-react";
 import { AgentItem } from "@/types";
 import { Button } from "@/components/ui/button";
 import { useDelTixStore } from "@/lib/store";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface Diagnostic {
@@ -27,25 +30,6 @@ interface Diagnostic {
   code: string;
 }
 
-const SAMPLE_DIAGNOSTICS: Diagnostic[] = [
-  {
-    id: "diag_1",
-    severity: "warning",
-    message: "Policy max_budget_usd is not bounded for tool paypal.batch_payout in environment live.",
-    line: 28,
-    column: 5,
-    code: "POL_W041",
-  },
-  {
-    id: "diag_2",
-    severity: "info",
-    message: "Node 'verify_grounding' uses default 0-cent tolerance check.",
-    line: 18,
-    column: 7,
-    code: "VER_I012",
-  },
-];
-
 interface AgentStudioProps {
   agent: AgentItem;
   onSave?: (yaml: string) => void;
@@ -56,20 +40,65 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
   const { createRunFromAgent, publishAgentVersion } = useDelTixStore();
   const [yamlContent, setYamlContent] = useState(agent.definitionYaml);
   const [activeTab, setActiveTab] = useState<"definition" | "ir">("definition");
-  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>(SAMPLE_DIAGNOSTICS);
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
   const [selectedDiagnostic, setSelectedDiagnostic] = useState<Diagnostic | null>(null);
   const [publishFeedback, setPublishFeedback] = useState<string | null>(null);
+  const [isCompiling, setIsCompiling] = useState(false);
+  const [compiledIR, setCompiledIR] = useState<Record<string, any> | null>(null);
 
   const errorCount = diagnostics.filter((d) => d.severity === "error").length;
   const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
 
-  const handleRunSandbox = () => {
-    const newRun = createRunFromAgent(agent.id);
+  const handleCompile = async () => {
+    setIsCompiling(true);
+    setPublishFeedback(null);
+    try {
+      const resp = await api.compilePrompt(yamlContent, "financial-disbursement");
+      if (resp.ir) {
+        setCompiledIR(resp.ir);
+      }
+
+      if (resp.validation_report?.errors && resp.validation_report.errors.length > 0) {
+        setDiagnostics(
+          resp.validation_report.errors.map((msg: string, idx: number) => ({
+            id: `err_${idx}`,
+            severity: "error",
+            message: msg,
+            line: idx + 1,
+            column: 1,
+            code: "VAL_ERR",
+          }))
+        );
+        setPublishFeedback("Validation reported errors in specification.");
+      } else {
+        setDiagnostics([]);
+        setPublishFeedback("Compiled & validated successfully!");
+      }
+    } catch (err: any) {
+      setDiagnostics([
+        {
+          id: `err_api`,
+          severity: "error",
+          message: err.message || "Failed to reach compiler service",
+          line: 1,
+          column: 1,
+          code: "COMPILER_ERR",
+        },
+      ]);
+      setPublishFeedback("Compiler error occurred.");
+    } finally {
+      setIsCompiling(false);
+      setTimeout(() => setPublishFeedback(null), 4000);
+    }
+  };
+
+  const handleRunSandbox = async () => {
+    const newRun = await createRunFromAgent(agent.id);
     router.push(`/runs/${newRun.id}`);
   };
 
-  const handlePublish = () => {
-    publishAgentVersion(agent.id);
+  const handlePublish = async () => {
+    await publishAgentVersion(agent.id);
     setPublishFeedback(`Published version successfully!`);
     setTimeout(() => setPublishFeedback(null), 3500);
   };
@@ -116,19 +145,27 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
         {/* Left: Code Editor */}
         <div className="flex-[55] flex flex-col border-r border-slate-5 bg-slate-2">
           <div className="p-2 border-b border-slate-5 bg-slate-3/40 flex items-center justify-between text-ui-xs text-slate-10 font-mono">
-            <span>agent_graph.yaml</span>
-            <span>UTF-8 • YAML</span>
+            <span>{activeTab === "definition" ? "agent_graph.yaml" : "agent_ir_synthesized.json"}</span>
+            <span>{activeTab === "definition" ? "UTF-8 • YAML" : "UTF-8 • JSON (Read-Only)"}</span>
           </div>
 
-          <textarea
-            value={yamlContent}
-            onChange={(e) => setYamlContent(e.target.value)}
-            spellCheck={false}
-            className="flex-1 p-4 bg-transparent font-mono text-ui-xs text-slate-11 focus:outline-none resize-none leading-relaxed selection:bg-blue-3 selection:text-blue-11"
-          />
+          {activeTab === "definition" ? (
+            <textarea
+              value={yamlContent}
+              onChange={(e) => setYamlContent(e.target.value)}
+              spellCheck={false}
+              className="flex-1 p-4 bg-transparent font-mono text-ui-xs text-slate-11 focus:outline-none resize-none leading-relaxed selection:bg-blue-3 selection:text-blue-11"
+            />
+          ) : (
+            <pre className="flex-1 p-4 bg-transparent font-mono text-ui-xs text-slate-11 overflow-auto leading-relaxed select-text">
+              {compiledIR
+                ? JSON.stringify(compiledIR, null, 2)
+                : "# No IR compiled yet. Click 'Compile Intent' below to generate Agent IR."}
+            </pre>
+          )}
         </div>
 
-        {/* Right: Compiler Output (VS Code Problems Panel Style) per Section 7.4 */}
+        {/* Right: Compiler Output */}
         <div className="flex-[45] flex flex-col bg-panel overflow-hidden">
           <div className="p-3 border-b border-slate-5 bg-slate-3/30 flex items-center justify-between text-ui-xs font-semibold uppercase tracking-wider text-slate-10">
             <span>Compiler Diagnostics ({diagnostics.length})</span>
@@ -206,13 +243,13 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
         </div>
       </div>
 
-      {/* Bottom Control Bar per Section 7.4 */}
+      {/* Bottom Control Bar */}
       <div className="h-10 border-t border-slate-5 bg-panel px-4 flex items-center justify-between text-ui shrink-0">
         <div className="flex items-center gap-2 text-ui-sm">
           {errorCount === 0 ? (
             <span className="flex items-center gap-1.5 text-green-11 font-medium">
               <CheckCircle2 className="h-4 w-4 text-green-9" />
-              <span>Compilation verified: 0 errors, {warningCount} warning</span>
+              <span>Compilation verified: 0 errors</span>
             </span>
           ) : (
             <span className="flex items-center gap-1.5 text-red-11 font-medium">
@@ -232,6 +269,22 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
           <Button
             variant="secondary"
             size="sm"
+            onClick={handleCompile}
+            disabled={isCompiling}
+            className="flex items-center gap-1.5"
+            title="Compile intent with Gemini cascade & Tarjan graph validator"
+          >
+            {isCompiling ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="h-3.5 w-3.5 text-blue-9" />
+            )}
+            <span>{isCompiling ? "Compiling..." : "Compile Intent"}</span>
+          </Button>
+
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={handleRunSandbox}
             className="flex items-center gap-1.5"
             title="Execute compiled graph in sandbox runtime"
@@ -244,7 +297,7 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
             variant="primary"
             size="sm"
             onClick={handlePublish}
-            disabled={errorCount > 0}
+            disabled={errorCount > 0 || isCompiling}
             className="flex items-center gap-1.5 font-semibold"
           >
             <Upload className="h-3.5 w-3.5" />
@@ -255,4 +308,3 @@ export function AgentStudio({ agent, onSave }: AgentStudioProps) {
     </div>
   );
 }
-

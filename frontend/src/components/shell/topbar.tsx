@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Search, Sun, Moon, ChevronRight, User, HelpCircle, Gamepad2, Keyboard } from "lucide-react";
@@ -8,6 +8,7 @@ import { EnvPill } from "@/components/ui/env-pill";
 import { useDelTixStore } from "@/lib/store";
 import { useTourStore } from "@/lib/tour-store";
 import { CommandPalette } from "./command-palette";
+import { api } from "@/lib/api";
 
 interface TopBarProps {
   onOpenShortcuts?: () => void;
@@ -19,6 +20,19 @@ export function TopBar({ onOpenShortcuts }: TopBarProps = {}) {
   const { startTour } = useTourStore();
   const [cmdOpen, setCmdOpen] = useState(false);
   const [isLight, setIsLight] = useState(false);
+  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
+
+  useEffect(() => {
+    api.getCurrentSession()
+      .then((sess) => {
+        if (sess?.user) {
+          setUser(sess.user);
+        } else if (sess?.email) {
+          setUser({ name: sess.name, email: sess.email });
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const toggleTheme = () => {
     const root = document.documentElement;
@@ -118,11 +132,32 @@ export function TopBar({ onOpenShortcuts }: TopBarProps = {}) {
             {isLight ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
           </button>
 
-          {/* User Profile Avatar */}
+          {/* User Profile Avatar / Sign In */}
           <div className="flex items-center gap-2 pl-1 border-l border-slate-5">
-            <div className="w-6 h-6 rounded-full bg-slate-4 border border-slate-6 flex items-center justify-center text-slate-12 font-medium text-ui-xs">
-              JD
-            </div>
+            {user ? (
+              <div
+                className="w-6 h-6 rounded-full bg-blue-3 border border-blue-6 flex items-center justify-center text-blue-11 font-medium text-[11px] font-mono cursor-pointer"
+                title={`Signed in as ${user.name || user.email}`}
+              >
+                {user.name
+                  ? user.name
+                      .split(" ")
+                      .map((w) => w[0])
+                      .join("")
+                      .substring(0, 2)
+                      .toUpperCase()
+                  : "OP"}
+              </div>
+            ) : (
+              <a
+                href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/v1/auth/google/login`}
+                className="h-7 px-2 rounded-btn bg-slate-3 border border-slate-5 text-slate-11 hover:text-slate-12 text-ui-xs flex items-center gap-1 font-medium"
+                title="Sign in with Google OAuth"
+              >
+                <User className="h-3 w-3" />
+                <span>Sign In</span>
+              </a>
+            )}
           </div>
         </div>
       </header>

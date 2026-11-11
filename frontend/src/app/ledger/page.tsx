@@ -1,13 +1,32 @@
 "use client";
 
-import React, { useState } from "react";
-import { Download, CheckCircle2, Clock, AlertTriangle } from "lucide-react";
-import { MOCK_LEDGER_ENTRIES } from "@/lib/mock-data";
+import React, { useMemo } from "react";
+import { Download, CheckCircle2, Clock, Landmark } from "lucide-react";
+import { LedgerEntryItem } from "@/types";
 import { Money } from "@/components/ui/money";
 import { Button } from "@/components/ui/button";
+import { useDelTixStore } from "@/lib/store";
 
 export default function LedgerPage() {
-  const [entries] = useState(MOCK_LEDGER_ENTRIES);
+  const { runs } = useDelTixStore();
+
+  // Derive settlement ledger from completed and settled runs
+  const entries: LedgerEntryItem[] = useMemo(() => {
+    return runs
+      .filter((r) => r.status === "COMPLETED" || r.status === "PAUSED_FOR_APPROVAL")
+      .map((r, i) => ({
+        id: `led_${r.id.slice(-8)}_${i}`,
+        runId: r.id,
+        referenceId: `REF-${r.id.slice(-6).toUpperCase()}`,
+        counterparty: r.counterparty,
+        amountCents: r.amountCents,
+        currency: r.currency,
+        disbursementMethod: "PayPal Sandbox Payouts",
+        idempotencyKey: `idem_sha256_${r.id.slice(-12)}`,
+        reconciliationStatus: r.status === "COMPLETED" ? ("reconciled" as const) : ("pending" as const),
+        timestamp: r.startedAt,
+      }));
+  }, [runs]);
 
   const handleExportCSV = () => {
     const headers = "Reference,Counterparty,Amount_USD,Currency,Disbursement_Method,Idempotency_Key,Status,Timestamp\n";
@@ -41,7 +60,8 @@ export default function LedgerPage() {
           variant="secondary"
           size="sm"
           onClick={handleExportCSV}
-          className="flex items-center gap-1.5 hover:border-slate-7 text-slate-12"
+          disabled={entries.length === 0}
+          className="flex items-center gap-1.5 hover:border-slate-7 text-slate-12 disabled:opacity-50"
           title="Export CSV reconciliation ledger"
         >
           <Download className="h-3.5 w-3.5" />
@@ -51,58 +71,67 @@ export default function LedgerPage() {
 
       {/* Ledger Table */}
       <div className="flex-1 overflow-auto bg-app">
-        <table className="w-full border-collapse text-left text-ui">
-          <thead className="sticky top-0 bg-panel border-b border-slate-5 text-ui-xs text-slate-10 font-medium z-10">
-            <tr>
-              <th className="py-2 px-3 w-32">Reference</th>
-              <th className="py-2 px-3">Counterparty</th>
-              <th className="py-2 px-3 text-right">Disbursed Amount</th>
-              <th className="py-2 px-3">Payment Method</th>
-              <th className="py-2 px-3">Idempotency Key</th>
-              <th className="py-2 px-3 w-32">Status</th>
-              <th className="py-2 px-3 text-right w-44">Settled At (UTC)</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-5">
-            {entries.map((item) => (
-              <tr key={item.id} className="hover:bg-slate-3 transition-colors h-10">
-                <td className="py-2 px-3 font-mono text-ui-xs text-slate-12 font-medium">
-                  {item.referenceId}
-                </td>
-                <td className="py-2 px-3 text-slate-11 font-medium">
-                  {item.counterparty}
-                </td>
-                <td className="py-2 px-3 text-right">
-                  <Money cents={item.amountCents} currency={item.currency} align="right" />
-                </td>
-                <td className="py-2 px-3 text-slate-11 text-ui-xs">
-                  {item.disbursementMethod}
-                </td>
-                <td className="py-2 px-3 font-mono text-ui-xs text-slate-10 truncate max-w-[200px]">
-                  {item.idempotencyKey}
-                </td>
-                <td className="py-2 px-3">
-                  {item.reconciliationStatus === "reconciled" ? (
-                    <span className="inline-flex items-center gap-1 text-green-11 text-ui-xs font-medium">
-                      <CheckCircle2 className="h-3 w-3 text-green-9" />
-                      Reconciled
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-amber-11 text-ui-xs font-medium">
-                      <Clock className="h-3 w-3 text-amber-9" />
-                      Pending Match
-                    </span>
-                  )}
-                </td>
-                <td className="py-2 px-3 text-right font-mono text-ui-xs text-slate-10">
-                  {new Date(item.timestamp).toISOString().replace("T", " ").substring(0, 19)}
-                </td>
+        {entries.length === 0 ? (
+          <div className="p-16 text-center text-slate-10 max-w-md mx-auto space-y-3">
+            <Landmark className="h-10 w-10 text-slate-8 mx-auto stroke-1" />
+            <h3 className="text-title-section text-slate-12">Settlement Ledger Empty</h3>
+            <p className="text-ui-xs text-slate-10">
+              When agents initiate financial disbursements with idempotency keys, their upstream settlement status and reconciliation tokens will appear here.
+            </p>
+          </div>
+        ) : (
+          <table className="w-full border-collapse text-left text-ui">
+            <thead className="sticky top-0 bg-panel border-b border-slate-5 text-ui-xs text-slate-10 font-medium z-10">
+              <tr>
+                <th className="py-2 px-3 w-32">Reference</th>
+                <th className="py-2 px-3">Counterparty</th>
+                <th className="py-2 px-3 text-right">Disbursed Amount</th>
+                <th className="py-2 px-3">Payment Method</th>
+                <th className="py-2 px-3">Idempotency Key</th>
+                <th className="py-2 px-3 w-32">Status</th>
+                <th className="py-2 px-3 text-right w-44">Settled At (UTC)</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-5">
+              {entries.map((item) => (
+                <tr key={item.id} className="hover:bg-slate-3 transition-colors h-10">
+                  <td className="py-2 px-3 font-mono text-ui-xs text-slate-12 font-medium">
+                    {item.referenceId}
+                  </td>
+                  <td className="py-2 px-3 text-slate-11 font-medium">
+                    {item.counterparty}
+                  </td>
+                  <td className="py-2 px-3 text-right">
+                    <Money cents={item.amountCents} currency={item.currency} align="right" />
+                  </td>
+                  <td className="py-2 px-3 text-slate-11 text-ui-xs">
+                    {item.disbursementMethod}
+                  </td>
+                  <td className="py-2 px-3 font-mono text-ui-xs text-slate-10 truncate max-w-[200px]">
+                    {item.idempotencyKey}
+                  </td>
+                  <td className="py-2 px-3">
+                    {item.reconciliationStatus === "reconciled" ? (
+                      <span className="inline-flex items-center gap-1 text-green-11 text-ui-xs font-medium">
+                        <CheckCircle2 className="h-3 w-3 text-green-9" />
+                        Reconciled
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-amber-11 text-ui-xs font-medium">
+                        <Clock className="h-3 w-3 text-amber-9" />
+                        Pending Match
+                      </span>
+                    )}
+                  </td>
+                  <td className="py-2 px-3 text-right font-mono text-ui-xs text-slate-10">
+                    {new Date(item.timestamp).toISOString().replace("T", " ").substring(0, 19)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
 }
-

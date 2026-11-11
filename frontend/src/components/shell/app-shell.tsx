@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./topbar";
@@ -12,8 +12,12 @@ import { useDelTixStore } from "@/lib/store";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { environment } = useDelTixStore();
+  const { environment, init } = useDelTixStore();
   const { shortcutsOpen, setShortcutsOpen } = useGlobalShortcuts();
+
+  useEffect(() => {
+    init();
+  }, [init]);
 
   // If on public Landing Page (/), render clean full-page view without console shell
   if (pathname === "/") {

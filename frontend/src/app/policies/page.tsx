@@ -1,8 +1,10 @@
 "use client";
 
-import React, { useState } from "react";
-import { ShieldCheck, Plus, CheckCircle2, AlertTriangle, Lock } from "lucide-react";
+import React, { useState, useEffect } from "react";
+import { ShieldCheck, Plus, CheckCircle2, AlertTriangle, Lock, Server, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 interface PolicyRule {
   id: string;
@@ -12,6 +14,18 @@ interface PolicyRule {
   actionOnViolation: "REQUIRE_HUMAN_APPROVAL" | "REJECT_RUN" | "CIRCUIT_BREAK";
   currentLimit: string;
   status: "active" | "disabled";
+}
+
+interface LiveCapability {
+  capability_id: string;
+  version: string;
+  description: string;
+  http_method: string;
+  endpoint_path: string;
+  is_mutation: boolean;
+  idempotent: boolean;
+  required_permissions?: string[];
+  status: string;
 }
 
 const INITIAL_POLICIES: PolicyRule[] = [
@@ -72,12 +86,37 @@ const INITIAL_POLICIES: PolicyRule[] = [
 ];
 
 export default function PoliciesPage() {
+  const [activeTab, setActiveTab] = useState<"policies" | "capabilities">("policies");
   const [policies, setPolicies] = useState<PolicyRule[]>(INITIAL_POLICIES);
+  const [capabilities, setCapabilities] = useState<LiveCapability[]>([]);
+  const [loadingCaps, setLoadingCaps] = useState(false);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [ruleName, setRuleName] = useState("");
   const [expression, setExpression] = useState("");
   const [threshold, setThreshold] = useState("");
   const [action, setAction] = useState<"REQUIRE_HUMAN_APPROVAL" | "REJECT_RUN" | "CIRCUIT_BREAK">("REQUIRE_HUMAN_APPROVAL");
+
+  useEffect(() => {
+    let mounted = true;
+    setLoadingCaps(true);
+    api.listCapabilities()
+      .then((data) => {
+        if (mounted && data.capabilities) {
+          setCapabilities(data.capabilities);
+        }
+      })
+      .catch((err) => {
+        console.warn("Could not load remote capabilities registry:", err);
+      })
+      .finally(() => {
+        if (mounted) setLoadingCaps(false);
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const handleCreatePolicy = (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,15 +150,41 @@ export default function PoliciesPage() {
           </p>
         </div>
 
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => setIsModalOpen(true)}
-          className="flex items-center gap-1.5 font-semibold shadow-sm"
-        >
-          <Plus className="h-3.5 w-3.5" />
-          <span>New Policy Rule</span>
-        </Button>
+        <div className="flex items-center gap-3">
+          {/* View Switcher Tabs */}
+          <div className="flex items-center gap-1 bg-slate-3 p-0.5 rounded-btn border border-slate-5">
+            <button
+              type="button"
+              onClick={() => setActiveTab("policies")}
+              className={cn(
+                "px-3 py-1 text-ui rounded font-medium transition-colors",
+                activeTab === "policies" ? "bg-slate-5 text-slate-12" : "text-slate-10 hover:text-slate-12"
+              )}
+            >
+              Policy Rules ({policies.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("capabilities")}
+              className={cn(
+                "px-3 py-1 text-ui rounded font-medium transition-colors",
+                activeTab === "capabilities" ? "bg-slate-5 text-slate-12" : "text-slate-10 hover:text-slate-12"
+              )}
+            >
+              Capability Registry ({capabilities.length})
+            </button>
+          </div>
+
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setIsModalOpen(true)}
+            className="flex items-center gap-1.5 font-semibold shadow-sm"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>New Policy Rule</span>
+          </Button>
+        </div>
       </div>
 
       {/* New Policy Modal */}
@@ -148,21 +213,21 @@ export default function PoliciesPage() {
             <form onSubmit={handleCreatePolicy} className="space-y-3.5 text-ui">
               <div>
                 <label className="text-ui-xs font-medium text-slate-11 block mb-1">
-                  Policy Name
+                  Rule Identifier (snake_case)
                 </label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. max_single_transaction_cap"
+                  placeholder="e.g. single_txn_cap_usd"
                   value={ruleName}
                   onChange={(e) => setRuleName(e.target.value)}
-                  className="w-full h-8 px-2.5 bg-slate-3 border border-slate-5 rounded-btn text-slate-12 focus:outline-none focus:border-blue-9"
+                  className="w-full px-3 py-1.5 bg-slate-2 border border-slate-5 rounded text-ui text-slate-12 focus:outline-none focus:border-blue-9 font-mono"
                 />
               </div>
 
               <div>
                 <label className="text-ui-xs font-medium text-slate-11 block mb-1">
-                  Deterministic Python Expression (AST Evaluated)
+                  Deterministic Math / Boolean Expression
                 </label>
                 <input
                   type="text"
@@ -170,21 +235,21 @@ export default function PoliciesPage() {
                   placeholder="e.g. amount_usd <= 1000.00"
                   value={expression}
                   onChange={(e) => setExpression(e.target.value)}
-                  className="w-full h-8 px-2.5 bg-slate-3 border border-slate-5 rounded-btn font-mono text-ui-xs text-slate-12 focus:outline-none focus:border-blue-9"
+                  className="w-full px-3 py-1.5 bg-slate-2 border border-slate-5 rounded text-ui text-slate-12 focus:outline-none focus:border-blue-9 font-mono"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-ui-xs font-medium text-slate-11 block mb-1">
-                    Threshold Description
+                    Display Threshold
                   </label>
                   <input
                     type="text"
-                    placeholder="e.g. $1,000.00 max"
+                    placeholder="e.g. $1,000.00 / txn"
                     value={threshold}
                     onChange={(e) => setThreshold(e.target.value)}
-                    className="w-full h-8 px-2.5 bg-slate-3 border border-slate-5 rounded-btn text-slate-12 focus:outline-none focus:border-blue-9"
+                    className="w-full px-3 py-1.5 bg-slate-2 border border-slate-5 rounded text-ui text-slate-12 focus:outline-none focus:border-blue-9"
                   />
                 </div>
 
@@ -195,7 +260,7 @@ export default function PoliciesPage() {
                   <select
                     value={action}
                     onChange={(e) => setAction(e.target.value as any)}
-                    className="w-full h-8 px-2 bg-slate-3 border border-slate-5 rounded-btn text-slate-12 focus:outline-none focus:border-blue-9"
+                    className="w-full px-3 py-1.5 bg-slate-2 border border-slate-5 rounded text-ui text-slate-12 focus:outline-none focus:border-blue-9"
                   >
                     <option value="REQUIRE_HUMAN_APPROVAL">Require Human Approval</option>
                     <option value="REJECT_RUN">Reject Run</option>
@@ -222,62 +287,127 @@ export default function PoliciesPage() {
         </div>
       )}
 
-      {/* Policies Table */}
+      {/* Main Content Area */}
       <div className="flex-1 overflow-auto bg-app">
-        <table className="w-full border-collapse text-left text-ui">
-          <thead className="sticky top-0 bg-panel border-b border-slate-5 text-ui-xs text-slate-10 font-medium z-10">
-            <tr>
-              <th className="py-2 px-3 w-48">Policy Rule</th>
-              <th className="py-2 px-3 w-36">Scope</th>
-              <th className="py-2 px-3">Deterministic Expression</th>
-              <th className="py-2 px-3 w-40">Current Threshold</th>
-              <th className="py-2 px-3 w-48">Action on Exceed</th>
-              <th className="py-2 px-3 w-24 text-center">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-5">
-            {policies.map((pol) => (
-              <tr key={pol.id} className="hover:bg-slate-3 transition-colors h-10">
-                <td className="py-2 px-3 font-medium text-slate-12">
-                  {pol.name}
-                </td>
-
-                <td className="py-2 px-3 font-mono text-ui-xs text-slate-10">
-                  {pol.scope}
-                </td>
-
-                <td className="py-2 px-3 font-mono text-ui-xs text-slate-11">
-                  {pol.expression}
-                </td>
-
-                <td className="py-2 px-3 text-slate-12 font-medium">
-                  {pol.currentLimit}
-                </td>
-
-                <td className="py-2 px-3">
-                  <span
-                    className={`px-1.5 py-0.5 rounded text-[11px] font-mono border ${
-                      pol.actionOnViolation === "REQUIRE_HUMAN_APPROVAL"
-                        ? "bg-amber-3 border-amber-6 text-amber-11"
-                        : "bg-red-3 border-red-6 text-red-11"
-                    }`}
-                  >
-                    {pol.actionOnViolation}
-                  </span>
-                </td>
-
-                <td className="py-2 px-3 text-center">
-                  <span className="inline-flex items-center gap-1 text-green-11 text-ui-xs font-medium">
-                    <CheckCircle2 className="h-3 w-3 text-green-9" />
-                    Active
-                  </span>
-                </td>
+        {activeTab === "policies" ? (
+          <table className="w-full border-collapse text-left text-ui">
+            <thead className="sticky top-0 bg-panel border-b border-slate-5 text-ui-xs text-slate-10 font-medium z-10">
+              <tr>
+                <th className="py-2 px-3 w-48">Policy Rule</th>
+                <th className="py-2 px-3 w-36">Scope</th>
+                <th className="py-2 px-3">Deterministic Expression</th>
+                <th className="py-2 px-3 w-40">Current Threshold</th>
+                <th className="py-2 px-3 w-48">Action on Exceed</th>
+                <th className="py-2 px-3 w-24 text-center">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-slate-5">
+              {policies.map((pol) => (
+                <tr key={pol.id} className="hover:bg-slate-3 transition-colors h-10">
+                  <td className="py-2 px-3 font-medium text-slate-12">
+                    {pol.name}
+                  </td>
+                  <td className="py-2 px-3 font-mono text-ui-xs text-slate-10">
+                    {pol.scope}
+                  </td>
+                  <td className="py-2 px-3 font-mono text-ui-xs text-slate-11">
+                    {pol.expression}
+                  </td>
+                  <td className="py-2 px-3 text-slate-12 font-medium">
+                    {pol.currentLimit}
+                  </td>
+                  <td className="py-2 px-3">
+                    <span
+                      className={`px-1.5 py-0.5 rounded text-[11px] font-mono border ${
+                        pol.actionOnViolation === "REQUIRE_HUMAN_APPROVAL"
+                          ? "bg-amber-3 border-amber-6 text-amber-11"
+                          : "bg-red-3 border-red-6 text-red-11"
+                      }`}
+                    >
+                      {pol.actionOnViolation}
+                    </span>
+                  </td>
+                  <td className="py-2 px-3 text-center">
+                    <span className="inline-flex items-center gap-1 text-green-11 text-ui-xs font-medium">
+                      <CheckCircle2 className="h-3 w-3 text-green-9" />
+                      Active
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <div>
+            {loadingCaps ? (
+              <div className="p-16 text-center text-slate-10 space-y-2">
+                <div className="w-5 h-5 border-2 border-blue-9 border-t-transparent rounded-full animate-spin mx-auto" />
+                <p className="text-ui-xs">Querying PostgreSQL capability registry...</p>
+              </div>
+            ) : capabilities.length === 0 ? (
+              <div className="p-16 text-center text-slate-10 max-w-md mx-auto space-y-2">
+                <Server className="h-8 w-8 text-slate-8 mx-auto stroke-1" />
+                <h3 className="text-title-section text-slate-12">No Capabilities Registered</h3>
+                <p className="text-ui-xs">
+                  Run the database migration <code className="font-mono">001_initial_schema.sql</code> to register official PayPal Sandbox adapters.
+                </p>
+              </div>
+            ) : (
+              <table className="w-full border-collapse text-left text-ui">
+                <thead className="sticky top-0 bg-panel border-b border-slate-5 text-ui-xs text-slate-10 font-medium z-10">
+                  <tr>
+                    <th className="py-2 px-3 w-64">Capability ID</th>
+                    <th className="py-2 px-3 w-24">Version</th>
+                    <th className="py-2 px-3 w-28">Method & Path</th>
+                    <th className="py-2 px-3">Contract Description</th>
+                    <th className="py-2 px-3 w-32 text-center">Idempotent</th>
+                    <th className="py-2 px-3 w-24 text-center">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-5">
+                  {capabilities.map((c) => (
+                    <tr key={c.capability_id} className="hover:bg-slate-3 transition-colors h-10">
+                      <td className="py-2 px-3 font-mono text-ui-xs text-slate-12 font-medium">
+                        {c.capability_id}
+                      </td>
+                      <td className="py-2 px-3 font-mono text-ui-xs text-slate-10">
+                        {c.version}
+                      </td>
+                      <td className="py-2 px-3 font-mono text-ui-xs">
+                        <span className="px-1 py-0.5 rounded bg-blue-3 text-blue-11 border border-blue-6 mr-1">
+                          {c.http_method}
+                        </span>
+                        <span className="text-slate-10">{c.endpoint_path}</span>
+                      </td>
+                      <td className="py-2 px-3 text-ui-xs text-slate-11">
+                        {c.description}
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        <span
+                          className={cn(
+                            "px-1.5 py-0.5 rounded text-[10px] font-mono border",
+                            c.idempotent
+                              ? "bg-green-3 border-green-6 text-green-11"
+                              : "bg-amber-3 border-amber-6 text-amber-11"
+                          )}
+                        >
+                          {c.idempotent ? "IDEMPOTENT" : "MUTATION"}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-center">
+                        <span className="inline-flex items-center gap-1 text-green-11 text-ui-xs font-medium">
+                          <CheckCircle2 className="h-3 w-3 text-green-9" />
+                          {c.status || "ACTIVE"}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
