@@ -17,14 +17,13 @@ import {
   DollarSign,
   Activity,
 } from "lucide-react";
-import { AppShell } from "@/components/shell/app-shell";
 import { Button } from "@/components/ui/button";
 import { Money } from "@/components/ui/money";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useDelTixStore } from "@/lib/store";
 
 export default function DashboardPage() {
-  const { runs, agents, init, isLoading } = useDelTixStore();
+  const { runs, agents, tenantId, init, isLoading } = useDelTixStore();
 
   useEffect(() => {
     init();
@@ -35,28 +34,27 @@ export default function DashboardPage() {
   const pendingApprovals = runs.filter((r) => r.status === "PAUSED_FOR_APPROVAL");
   const failedOrRejectedRuns = runs.filter((r) => r.status === "FAILED" || r.status === "REJECTED");
 
-  const totalSettledCents = completedRuns.reduce((sum, r) => sum + (r.amountCents || 0), 0);
+  const totalSettledCents = completedRuns.reduce((sum, r) => sum + (r.settledCents ?? 0), 0);
   const totalSavedCents = failedOrRejectedRuns.reduce((sum, r) => sum + (r.amountCents || 0), 0) +
-    pendingApprovals.reduce((sum, r) => sum + (r.approvalDetails?.amountCents || 0), 0);
+    pendingApprovals.reduce((sum, r) => sum + (r.approvalDetails?.amountCents || r.amountCents || 0), 0);
 
   const activeAgentsCount = agents.length;
   const runningExecutionsCount = runs.filter((r) => r.status === "RUNNING").length;
 
   return (
-    <AppShell>
-      <div className="flex-1 flex flex-col h-full bg-slate-1 overflow-y-auto">
-        {/* Top Header */}
-        <div className="border-b border-slate-5 bg-panel px-6 py-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-xl font-semibold text-slate-12 tracking-tight">
-                  Financial AI Agent Operations
-                </h1>
-                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-blue-3 border border-blue-6 text-blue-11 font-medium">
-                  TENANT: org_prod_442
-                </span>
-              </div>
+    <div className="flex-1 flex flex-col h-full bg-slate-1 overflow-y-auto">
+      {/* Top Header */}
+      <div className="border-b border-slate-5 bg-panel px-6 py-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-semibold text-slate-12 tracking-tight">
+                Financial AI Agent Operations
+              </h1>
+              <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-blue-3 border border-blue-6 text-blue-11 font-medium">
+                TENANT: {tenantId || "—"}
+              </span>
+            </div>
               <p className="text-sm text-slate-10 mt-1">
                 Real-time overview of autonomous financial workflows, spend limits, and human approval gates.
               </p>
@@ -326,7 +324,7 @@ export default function DashboardPage() {
                           <StatusBadge status={run.status} />
                         </td>
                         <td className="py-3 px-4 text-right font-mono font-medium text-slate-12">
-                          <Money amountCents={run.amountCents} />
+                          <Money amountCents={run.status === "COMPLETED" ? (run.settledCents ?? 0) : run.amountCents} />
                         </td>
                         <td className="py-3 px-4 text-slate-10 font-mono text-[11px]">
                           {new Date(run.startedAt).toLocaleTimeString()}
@@ -363,6 +361,5 @@ export default function DashboardPage() {
           </div>
         </div>
       </div>
-    </AppShell>
   );
 }

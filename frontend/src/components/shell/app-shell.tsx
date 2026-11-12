@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./topbar";
 import { SandboxBanner } from "@/components/ui/env-pill";
@@ -12,15 +12,26 @@ import { useDelTixStore } from "@/lib/store";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { environment, init } = useDelTixStore();
+  const router = useRouter();
+  const { environment, init, session, authChecked } = useDelTixStore();
   const { shortcutsOpen, setShortcutsOpen } = useGlobalShortcuts();
 
-  useEffect(() => {
-    init();
-  }, [init]);
+  const isPublicRoute = pathname === "/" || pathname.startsWith("/login");
 
-  // If on public Landing Page (/), render clean full-page view without console shell
-  if (pathname === "/") {
+  useEffect(() => {
+    if (!pathname.startsWith("/login")) {
+      init();
+    }
+  }, [init, pathname]);
+
+  useEffect(() => {
+    if (!isPublicRoute && authChecked && !session) {
+      router.replace(`/login?next=${encodeURIComponent(pathname)}`);
+    }
+  }, [isPublicRoute, authChecked, session, pathname, router]);
+
+  // Render clean full-page view without console shell on public landing and login pages
+  if (isPublicRoute) {
     return (
       <main className="w-screen h-screen overflow-y-auto bg-app">
         {children}

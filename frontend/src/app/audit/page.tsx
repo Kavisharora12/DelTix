@@ -62,8 +62,9 @@ export default function AuditPage() {
     let seq = 1000;
 
     runs.forEach((r) => {
-      const amountUSD = (r.amountCents || 0) / 100;
-      const idempotencyKey = `idem_${r.id.replace(/-/g, "").slice(0, 16)}_${r.startedAt.slice(0, 10)}`;
+      const settledUSD = (r.settledCents ?? 0) / 100;
+      const requestedUSD = (r.amountCents || 0) / 100;
+      const idempotencyKey = "Not issued";
 
       // 1. Run initiation log
       seq++;
@@ -73,17 +74,17 @@ export default function AuditPage() {
         actor: "orchestrator",
         action: "SPEC_EXECUTED",
         agentName: r.agentName,
-        amountUSD: 0,
+        amountUSD: requestedUSD,
         operator: r.counterparty || "Automated",
         target: r.agentName,
         targetId: r.id,
         timestamp: r.startedAt,
-        hash: `sha256_${r.id}_${new Date(r.startedAt).getTime()}`,
+        hash: r.id,
         idempotencyKey,
         status: "success",
         statusCode: 200,
-        databaseIntegrity: "VERIFIED UNMODIFIED ON SUPABASE POSTGRESQL 16 ✓",
-        piiMaskingStatus: "Credit Card & Authorization Headers Sanitized ✓",
+        databaseIntegrity: "Derived from Backend Run Record",
+        piiMaskingStatus: "Not issued",
       });
 
       // 2. Approval gate log if applicable
@@ -96,16 +97,16 @@ export default function AuditPage() {
           action: r.status === "REJECTED" ? "APPROVAL_REJECTED" : "SPEND_GATE_PAUSE",
           agentName: r.agentName,
           amountUSD: (r.approvalDetails.amountCents || 0) / 100,
-          operator: r.approvalDetails.requestedBy || "PolicyEngine",
+          operator: r.approvalDetails.requestedBy || "Policy Guard",
           target: r.approvalDetails.triggeredRule,
           targetId: r.id,
           timestamp: r.approvalDetails.waitingSince || r.startedAt,
-          hash: `sha256_appr_${r.id}_${seq}`,
+          hash: r.id,
           idempotencyKey,
           status: r.status === "REJECTED" ? "blocked" : "flagged",
           statusCode: r.status === "REJECTED" ? 403 : 429,
-          databaseIntegrity: "VERIFIED UNMODIFIED ON SUPABASE POSTGRESQL 16 ✓",
-          piiMaskingStatus: "Dual-Key HMAC Signature Sealed ✓",
+          databaseIntegrity: "Derived from Backend Run Record",
+          piiMaskingStatus: r.approvalDetails.signedToken || r.approvalDetails.tokenHash ? "Approval Token Recorded" : "Not issued",
         });
       }
 
@@ -116,19 +117,19 @@ export default function AuditPage() {
           seqId: seq,
           id: `aud_${r.id.slice(-8)}_settle`,
           actor: "executor_worker",
-          action: "PAYPAL_REFUND",
+          action: "RUN_COMPLETED",
           agentName: r.agentName,
-          amountUSD,
-          operator: "Automated (PayPal)",
-          target: r.counterparty,
-          targetId: r.counterpartyId,
+          amountUSD: settledUSD,
+          operator: "PayPal Sandbox",
+          target: r.counterparty || "Unspecified",
+          targetId: r.counterpartyId || r.id,
           timestamp: new Date(new Date(r.startedAt).getTime() + (r.durationMs || 1000)).toISOString(),
-          hash: `sha256_settle_${r.id}_${seq}`,
+          hash: r.id,
           idempotencyKey,
           status: "success",
           statusCode: 200,
-          databaseIntegrity: "VERIFIED UNMODIFIED ON SUPABASE POSTGRESQL 16 ✓",
-          piiMaskingStatus: "PayPal Request Idempotency Key Enforced ✓",
+          databaseIntegrity: "Derived from Backend Run Record",
+          piiMaskingStatus: "Not issued",
         });
       }
     });
@@ -200,7 +201,7 @@ export default function AuditPage() {
       "AMOUNT_USD",
       "OPERATOR",
       "STATUS_CODE",
-      "SHA256_HASH",
+      "RUN_OR_TARGET_ID",
       "IDEMPOTENCY_KEY",
     ];
     const rows = filteredLogs.map((l) => [
@@ -234,7 +235,7 @@ export default function AuditPage() {
             Financial Audit Ledger &amp; Compliance Trail
           </h1>
           <p className="text-ui text-slate-10 mt-0.5">
-            Append-only, SHA-256 chained transaction logs and HMAC token generation proofs.
+            Run lifecycle events, spend-gate decisions, and execution records derived from backend runs.
           </p>
         </div>
 
@@ -358,7 +359,7 @@ export default function AuditPage() {
                 <th className="py-2.5 px-3 text-right w-28">Amount</th>
                 <th className="py-2.5 px-3 w-36">Operator</th>
                 <th className="py-2.5 px-3 w-28 text-center">Status</th>
-                <th className="py-2.5 px-3">SHA-256 Hash</th>
+                <th className="py-2.5 px-3">Run / Reference ID</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-5">
@@ -467,7 +468,7 @@ export default function AuditPage() {
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-green-9" />
               <span className="text-xs font-semibold text-slate-12 uppercase tracking-wider">
-                Cryptographic Record Inspector
+                Audit Event Inspector
               </span>
               <span className="text-[11px] font-mono text-slate-9">
                 (Record ID: {selectedLog.id})
@@ -483,12 +484,12 @@ export default function AuditPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono">
             <div className="p-2.5 rounded bg-slate-2 border border-slate-5 space-y-1">
-              <div className="text-[10px] text-slate-9 uppercase">SHA-256 Checksum</div>
+              <div className="text-[10px] text-slate-9 uppercase">Run / Target Reference</div>
               <div className="text-slate-12 text-[11px] break-all select-text">
                 {selectedLog.hash}
               </div>
               <div className="text-green-11 text-[11px] font-medium pt-1">
-                Database Integrity: [{selectedLog.databaseIntegrity}]
+                Source: [{selectedLog.databaseIntegrity}]
               </div>
             </div>
 
@@ -498,7 +499,7 @@ export default function AuditPage() {
                 {selectedLog.idempotencyKey}
               </div>
               <div className="text-blue-11 text-[11px] font-medium pt-1">
-                PII Masking Status: [{selectedLog.piiMaskingStatus}]
+                Verification State: [{selectedLog.piiMaskingStatus}]
               </div>
             </div>
           </div>

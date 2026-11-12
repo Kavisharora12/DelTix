@@ -2,13 +2,12 @@
 
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Search, Sun, Moon, ChevronRight, User, HelpCircle, Gamepad2, Keyboard, Bell } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Search, Sun, Moon, ChevronRight, User, HelpCircle, Gamepad2, Keyboard, Bell, LogOut } from "lucide-react";
 import { EnvPill } from "@/components/ui/env-pill";
 import { useDelTixStore } from "@/lib/store";
 import { useTourStore } from "@/lib/tour-store";
 import { CommandPalette } from "./command-palette";
-import { api } from "@/lib/api";
 
 interface TopBarProps {
   onOpenShortcuts?: () => void;
@@ -16,25 +15,18 @@ interface TopBarProps {
 
 export function TopBar({ onOpenShortcuts }: TopBarProps = {}) {
   const pathname = usePathname();
-  const { environment, setEnvironment, runs } = useDelTixStore();
+  const router = useRouter();
+  const { environment, setEnvironment, runs, session, logout } = useDelTixStore();
   const { startTour } = useTourStore();
   const [cmdOpen, setCmdOpen] = useState(false);
   const [isLight, setIsLight] = useState(false);
-  const [user, setUser] = useState<{ name?: string; email?: string } | null>(null);
 
   const pendingApprovalsCount = runs.filter((r) => r.status === "PAUSED_FOR_APPROVAL").length;
 
-  useEffect(() => {
-    api.getCurrentSession()
-      .then((sess) => {
-        if (sess?.user) {
-          setUser(sess.user);
-        } else if (sess?.email) {
-          setUser({ name: sess.name, email: sess.email });
-        }
-      })
-      .catch(() => {});
-  }, []);
+  const handleLogout = async () => {
+    await logout();
+    router.push("/login");
+  };
 
   const toggleTheme = () => {
     const root = document.documentElement;
@@ -55,7 +47,7 @@ export function TopBar({ onOpenShortcuts }: TopBarProps = {}) {
   if (pathSegments[0] === "sandbox") breadcrumbTitle = "Live Sandbox";
   if (pathSegments[0] === "runs") breadcrumbTitle = "Runs";
   if (pathSegments[0] === "approvals") breadcrumbTitle = "Approvals";
-  if (pathSegments[0] === "agents") breadcrumbTitle = "Agents & Studio";
+  if (pathSegments[0] === "agents") breadcrumbTitle = "Agent Registry";
   if (pathSegments[0] === "policies") breadcrumbTitle = "Policies & Caps";
   if (pathSegments[0] === "ledger") breadcrumbTitle = "Settlement Ledger";
   if (pathSegments[0] === "audit") breadcrumbTitle = "Audit Trail";
@@ -152,29 +144,42 @@ export function TopBar({ onOpenShortcuts }: TopBarProps = {}) {
 
           {/* User Profile Avatar / Sign In */}
           <div className="flex items-center gap-2 pl-1 border-l border-slate-5">
-            {user ? (
-              <div
-                className="w-6 h-6 rounded-full bg-blue-3 border border-blue-6 flex items-center justify-center text-blue-11 font-medium text-[11px] font-mono cursor-pointer"
-                title={`Signed in as ${user.name || user.email}`}
-              >
-                {user.name
-                  ? user.name
-                      .split(" ")
-                      .map((w) => w[0])
-                      .join("")
-                      .substring(0, 2)
-                      .toUpperCase()
-                  : "OP"}
+            {session ? (
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-6 h-6 rounded-full bg-blue-3 border border-blue-6 flex items-center justify-center text-blue-11 font-medium text-[11px] font-mono"
+                  title={`Signed in as ${session.name || session.email} (${session.tenant_id})`}
+                >
+                  {session.name
+                    ? session.name
+                        .split(" ")
+                        .map((w) => w[0])
+                        .join("")
+                        .substring(0, 2)
+                        .toUpperCase()
+                    : (session.email?.[0] || "OP").toUpperCase()}
+                </div>
+                <span className="hidden lg:inline text-[11px] text-slate-11 max-w-[140px] truncate">
+                  {session.name || session.email}
+                </span>
+                <button
+                  onClick={handleLogout}
+                  title="Sign out"
+                  className="h-7 px-2 rounded-btn bg-slate-3 border border-slate-5 text-slate-10 hover:text-slate-12 text-ui-xs flex items-center gap-1 font-medium"
+                >
+                  <LogOut className="h-3 w-3" />
+                  <span className="hidden xl:inline">Sign Out</span>
+                </button>
               </div>
             ) : (
-              <a
-                href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}/v1/auth/google/login`}
+              <Link
+                href="/login"
                 className="h-7 px-2 rounded-btn bg-slate-3 border border-slate-5 text-slate-11 hover:text-slate-12 text-ui-xs flex items-center gap-1 font-medium"
                 title="Sign in with Google OAuth"
               >
                 <User className="h-3 w-3" />
                 <span>Sign In</span>
-              </a>
+              </Link>
             )}
           </div>
         </div>

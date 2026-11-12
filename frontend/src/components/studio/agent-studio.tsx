@@ -1,334 +1,304 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
-  AlertTriangle,
-  Info,
   CheckCircle2,
   Play,
-  Upload,
-  Code2,
-  FileText,
   GitBranch,
   Sparkles,
   Loader2,
+  ShieldCheck,
+  Lock,
+  ArrowDown,
 } from "lucide-react";
 import { AgentItem } from "@/types";
 import { Button } from "@/components/ui/button";
-import { useDelTixStore } from "@/lib/store";
-import { api } from "@/lib/api";
-import { cn } from "@/lib/utils";
-
-interface Diagnostic {
-  id: string;
-  severity: "error" | "warning" | "info";
-  message: string;
-  line: number;
-  column: number;
-  code: string;
-}
+import { api, BackendAgentSpec } from "@/lib/api";
 
 interface AgentStudioProps {
   agent: AgentItem;
-  onSave?: (yaml: string) => void;
 }
 
-export function AgentStudio({ agent, onSave }: AgentStudioProps) {
+export function AgentStudio({ agent }: AgentStudioProps) {
   const router = useRouter();
-  const { createRunFromAgent, publishAgentVersion } = useDelTixStore();
-  const [yamlContent, setYamlContent] = useState(agent.definitionYaml);
-  const [activeTab, setActiveTab] = useState<"definition" | "ir">("definition");
-  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
-  const [selectedDiagnostic, setSelectedDiagnostic] = useState<Diagnostic | null>(null);
-  const [publishFeedback, setPublishFeedback] = useState<string | null>(null);
-  const [isCompiling, setIsCompiling] = useState(false);
-  const [compiledIR, setCompiledIR] = useState<Record<string, any> | null>(null);
+  const [isLoadingSpec, setIsLoadingSpec] = useState(false);
+  const [specDetail, setSpecDetail] = useState<BackendAgentSpec | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    setYamlContent(agent.definitionYaml);
-    setDiagnostics([]);
-    setCompiledIR(null);
-  }, [agent.id, agent.definitionYaml]);
+    let cancelled = false;
+    setIsLoadingSpec(true);
+    setLoadError(null);
+    setSpecDetail(null);
 
-  const errorCount = diagnostics.filter((d) => d.severity === "error").length;
-  const warningCount = diagnostics.filter((d) => d.severity === "warning").length;
-
-  const handleCompile = async () => {
-    setIsCompiling(true);
-    setPublishFeedback(null);
-    try {
-      const resp = await api.compilePrompt({
-        name: agent.name,
-        category: "financial-disbursement",
-        natural_language_prompt: yamlContent,
+    api
+      .getSpec(agent.id)
+      .then((spec) => {
+        if (!cancelled) {
+          setSpecDetail(spec);
+        }
+      })
+      .catch((err: any) => {
+        if (!cancelled) {
+          setLoadError(err?.message || "Failed to load specification details.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsLoadingSpec(false);
+        }
       });
-      if (resp.agent_ir) {
-        setCompiledIR(resp.agent_ir);
-      }
 
-      if (resp.validation_report?.errors && resp.validation_report.errors.length > 0) {
-        setDiagnostics(
-          resp.validation_report.errors.map((msg: string, idx: number) => ({
-            id: `err_${idx}`,
-            severity: "error",
-            message: msg,
-            line: idx + 1,
-            column: 1,
-            code: "VAL_ERR",
-          }))
-        );
-        setPublishFeedback("Validation reported errors in specification.");
-      } else {
-        setDiagnostics([]);
-        setPublishFeedback("Compiled & validated successfully!");
-      }
-    } catch (err: any) {
-      setDiagnostics([
-        {
-          id: `err_api`,
-          severity: "error",
-          message: err.message || "Failed to reach compiler service",
-          line: 1,
-          column: 1,
-          code: "COMPILER_ERR",
-        },
-      ]);
-      setPublishFeedback("Compiler error occurred.");
-    } finally {
-      setIsCompiling(false);
-      setTimeout(() => setPublishFeedback(null), 4000);
-    }
-  };
+    return () => {
+      cancelled = true;
+    };
+  }, [agent.id]);
 
-  const handleRunSandbox = async () => {
-    const newRun = await createRunFromAgent(agent.id);
-    router.push(`/runs/${newRun.id}`);
-  };
-
-  const handlePublish = async () => {
-    await publishAgentVersion(agent.id);
-    setPublishFeedback(`Published version successfully!`);
-    setTimeout(() => setPublishFeedback(null), 3500);
-  };
+  const compiledIR = specDetail?.agent_ir || specDetail?.ir_payload || null;
+  const irNodes = Array.isArray(compiledIR?.nodes) ? compiledIR.nodes : [];
+  const policies = compiledIR?.policies;
+  const limits = compiledIR?.execution_limits;
+  const capabilities = Array.isArray(compiledIR?.capabilities) ? compiledIR.capabilities : [];
+  const validationErrors = specDetail?.validation_report?.errors || [];
 
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-app select-none">
       {/* Top Header */}
       <div className="h-12 border-b border-slate-5 bg-panel px-4 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
-          <span className="text-title-section text-slate-12">{agent.name}</span>
-          <span className="font-mono text-ui-xs px-1.5 py-0.5 rounded bg-slate-3 border border-slate-5 text-slate-11">
+        <div className="flex items-center gap-3 min-w-0">
+          <span className="text-title-section text-slate-12 truncate">{agent.name}</span>
+          <span className="font-mono text-ui-xs px-1.5 py-0.5 rounded bg-slate-3 border border-slate-5 text-slate-11 shrink-0">
             {agent.version}
           </span>
-          <span className="text-ui-xs text-slate-10">Owner: {agent.owner}</span>
+          <span className="text-ui-xs text-slate-10 truncate">
+            ID: {agent.id}
+          </span>
         </div>
 
-        {/* Editor Mode Tabs */}
-        <div className="flex items-center gap-1 bg-slate-3 p-0.5 rounded-btn border border-slate-5">
-          <button
-            type="button"
-            onClick={() => setActiveTab("definition")}
-            className={cn(
-              "px-3 py-1 text-ui rounded font-medium transition-colors",
-              activeTab === "definition" ? "bg-slate-5 text-slate-12" : "text-slate-10 hover:text-slate-12"
-            )}
-          >
-            Agent Definition (YAML)
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("ir")}
-            className={cn(
-              "px-3 py-1 text-ui rounded font-medium transition-colors",
-              activeTab === "ir" ? "bg-slate-5 text-slate-12" : "text-slate-10 hover:text-slate-12"
-            )}
-          >
-            Compiled IR Preview
-          </button>
+        <div className="flex items-center gap-2 shrink-0 text-ui-xs font-mono">
+          {isLoadingSpec ? (
+            <span className="flex items-center gap-1 text-slate-10">
+              <Loader2 className="h-3 w-3 animate-spin" /> Syncing spec...
+            </span>
+          ) : validationErrors.length > 0 ? (
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-3 border border-red-6 text-red-11">
+              <AlertCircle className="h-3 w-3" /> {validationErrors.length} errors
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 px-2 py-0.5 rounded bg-green-3 border border-green-6 text-green-11 font-medium">
+              <CheckCircle2 className="h-3 w-3" /> Sealed &amp; Ready
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Main Split Pane: Left Editor (55%) + Right Problems & Diagnostics Panel (45%) */}
+      {/* Main Split Pane: Left Readable Workflow Steps (55%) + Right Policy & Limits Overview (45%) */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        {/* Left: Code Editor */}
-        <div className="flex-[55] flex flex-col border-r border-slate-5 bg-slate-2">
-          <div className="p-2 border-b border-slate-5 bg-slate-3/40 flex items-center justify-between text-ui-xs text-slate-10 font-mono">
-            <span>{activeTab === "definition" ? "agent_graph.yaml" : "agent_ir_synthesized.json"}</span>
-            <span>{activeTab === "definition" ? "UTF-8 • YAML" : "UTF-8 • JSON (Read-Only)"}</span>
-          </div>
-
-          {activeTab === "definition" ? (
-            <textarea
-              value={yamlContent}
-              onChange={(e) => setYamlContent(e.target.value)}
-              spellCheck={false}
-              className="flex-1 p-4 bg-transparent font-mono text-ui-xs text-slate-11 focus:outline-none resize-none leading-relaxed selection:bg-blue-3 selection:text-blue-11"
-            />
-          ) : (
-            <pre className="flex-1 p-4 bg-transparent font-mono text-ui-xs text-slate-11 overflow-auto leading-relaxed select-text">
-              {compiledIR
-                ? JSON.stringify(compiledIR, null, 2)
-                : "# No IR compiled yet. Click 'Compile Intent' below to generate Agent IR."}
-            </pre>
-          )}
-        </div>
-
-        {/* Right: Compiler Output */}
-        <div className="flex-[45] flex flex-col bg-panel overflow-hidden">
-          <div className="p-3 border-b border-slate-5 bg-slate-3/30 flex items-center justify-between text-ui-xs font-semibold uppercase tracking-wider text-slate-10">
-            <span>Compiler Diagnostics ({diagnostics.length})</span>
-            <div className="flex items-center gap-3">
-              <span className="flex items-center gap-1 text-red-11">
-                <AlertCircle className="h-3 w-3 text-red-9" /> {errorCount} errors
-              </span>
-              <span className="flex items-center gap-1 text-amber-11">
-                <AlertTriangle className="h-3 w-3 text-amber-9" /> {warningCount} warnings
-              </span>
+        {/* Left: Visual Workflow Step Flow (no raw YAML/JSON dumps) */}
+        <div className="flex-[55] flex flex-col border-r border-slate-5 bg-slate-1 overflow-hidden min-w-0">
+          <div className="p-3 border-b border-slate-5 bg-panel/60 flex items-center justify-between text-ui-xs font-semibold uppercase tracking-wider text-slate-10">
+            <div className="flex items-center gap-1.5">
+              <GitBranch className="h-3.5 w-3.5 text-blue-9" />
+              <span>Compiled Workflow Steps ({irNodes.length})</span>
             </div>
+            <span className="font-mono text-[11px] text-slate-9">
+              {specDetail?.category || compiledIR?.metadata?.category || "financial-workflow"}
+            </span>
           </div>
 
-          {/* Diagnostics List */}
-          <div className="flex-1 overflow-y-auto divide-y divide-slate-5">
-            {diagnostics.length === 0 ? (
-              <div className="p-6 text-center text-slate-10 text-ui-sm flex flex-col items-center gap-2">
-                <CheckCircle2 className="h-6 w-6 text-green-9" />
-                <span>Compiler clean. Zero errors or rule warnings.</span>
+          <div className="flex-1 p-5 overflow-y-auto space-y-2">
+            {isLoadingSpec ? (
+              <div className="h-full flex items-center justify-center gap-2 text-ui-xs text-slate-10">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span>Loading workflow steps...</span>
+              </div>
+            ) : irNodes.length === 0 ? (
+              <div className="h-full flex items-center justify-center text-ui-xs text-slate-9">
+                No workflow steps found for this specification.
               </div>
             ) : (
-              diagnostics.map((diag) => {
-                const isSelected = selectedDiagnostic?.id === diag.id;
-
-                return (
-                  <div
-                    key={diag.id}
-                    onClick={() => setSelectedDiagnostic(diag)}
-                    className={cn(
-                      "p-3 cursor-pointer hover:bg-slate-3 transition-colors text-ui-sm flex items-start gap-2.5",
-                      isSelected && "bg-slate-4"
-                    )}
-                  >
-                    {diag.severity === "error" && (
-                      <AlertCircle className="h-4 w-4 text-red-9 shrink-0 mt-0.5" />
-                    )}
-                    {diag.severity === "warning" && (
-                      <AlertTriangle className="h-4 w-4 text-amber-9 shrink-0 mt-0.5" />
-                    )}
-                    {diag.severity === "info" && (
-                      <Info className="h-4 w-4 text-blue-9 shrink-0 mt-0.5" />
-                    )}
-
-                    <div className="flex-1 min-w-0">
-                      <div className="text-slate-12 leading-tight">
-                        {diag.message}
+              irNodes.map((node: any, idx: number) => (
+                <React.Fragment key={node.id || idx}>
+                  <div className="p-3 rounded-card bg-panel border border-slate-5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="w-5 h-5 rounded-full bg-slate-3 border border-slate-5 text-[11px] font-mono text-slate-11 flex items-center justify-center shrink-0">
+                          {idx + 1}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-12 truncate">
+                          {node.title || node.id.replace(/_/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase())}
+                        </span>
                       </div>
-                      <div className="font-mono text-ui-xs text-slate-10 mt-1 flex items-center gap-2">
-                        <span>line {diag.line}:{diag.column}</span>
-                        <span>•</span>
-                        <span>{diag.code}</span>
-                      </div>
+                      {node.description && (
+                        <p className="text-[11px] text-slate-10 mt-1 pl-7 line-clamp-2">
+                          {node.description}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <span className="px-2 py-0.5 rounded bg-blue-2 border border-blue-6/60 text-[10px] font-mono font-medium text-blue-11">
+                        {node.type || "STEP"}
+                      </span>
+                      {node.payload?.capability_id && (
+                        <span className="text-[10px] font-mono text-slate-10">
+                          {node.payload.capability_id}
+                        </span>
+                      )}
                     </div>
                   </div>
-                );
-              })
+                  {idx < irNodes.length - 1 && (
+                    <div className="flex justify-center py-0.5">
+                      <ArrowDown className="h-3.5 w-3.5 text-slate-7" />
+                    </div>
+                  )}
+                </React.Fragment>
+              ))
             )}
           </div>
+        </div>
 
-          {/* Quick Graph Structure Preview */}
-          <div className="h-48 border-t border-slate-5 bg-slate-2 p-3 overflow-y-auto">
-            <div className="text-ui-xs text-slate-10 font-semibold uppercase tracking-wider mb-2 flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <GitBranch className="h-3.5 w-3.5" />
-                <span>Synthesized Node Execution Order</span>
-              </div>
-              {compiledIR?.nodes && (
-                <span className="text-[11px] font-mono text-green-11">
-                  {compiledIR.nodes.length} nodes
-                </span>
-              )}
-            </div>
-            <div className="space-y-1 font-mono text-ui-xs text-slate-11">
-              {compiledIR?.nodes && compiledIR.nodes.length > 0 ? (
-                compiledIR.nodes.map((node: any, idx: number) => (
-                  <div key={node.id || idx} className="truncate">
-                    {idx + 1}. [{node.type || "NODE"}] {node.title || node.id}
-                  </div>
-                ))
-              ) : (
-                <>
-                  <div>1. [INGEST] ingest_invoice</div>
-                  <div>2. [MATH] reconcile_math (Decimal AST)</div>
-                  <div>3. [GROUND] verify_grounding</div>
-                  <div>4. [POLICY] check_policy (max_budget_usd)</div>
-                  <div>5. [GATE] require_human_approval</div>
-                  <div>6. [TOOL] disburse_payout (paypal_refund_capture)</div>
-                </>
-              )}
-            </div>
+        {/* Right: Guardrails, Limits & Permitted PayPal Actions */}
+        <div className="flex-[45] flex flex-col bg-panel overflow-y-auto p-4 space-y-4">
+          <div className="text-ui-xs font-semibold uppercase tracking-wider text-slate-10 pb-2 border-b border-slate-5">
+            Active Financial Guardrails
           </div>
+
+          {loadError ? (
+            <div className="p-3 rounded bg-red-2 border border-red-6 text-ui-xs text-red-11">
+              {loadError}
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2.5 text-ui-xs">
+                <div className="p-3 rounded-card bg-slate-2 border border-slate-5">
+                  <div className="text-[10px] text-slate-9 uppercase font-mono">Max Budget / Run</div>
+                  <div className="font-mono font-semibold text-sm text-slate-12 mt-1">
+                    {isLoadingSpec
+                      ? "Loading..."
+                      : policies
+                        ? `$${Number(policies.max_budget_usd ?? 0).toFixed(2)} USD`
+                        : "Not set"}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-card bg-slate-2 border border-slate-5">
+                  <div className="text-[10px] text-slate-9 uppercase font-mono">Approval Gate</div>
+                  <div className="font-mono font-semibold text-sm text-slate-12 mt-1">
+                    {isLoadingSpec
+                      ? "Loading..."
+                      : policies
+                        ? policies.require_human_approval
+                          ? "Human Sign-Off"
+                          : "Auto-Execute"
+                        : "Not set"}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-card bg-slate-2 border border-slate-5">
+                  <div className="text-[10px] text-slate-9 uppercase font-mono">Step Ceiling</div>
+                  <div className="font-mono font-medium text-slate-12 mt-1">
+                    {isLoadingSpec
+                      ? "Loading..."
+                      : limits?.max_steps
+                        ? `${limits.max_steps} max steps`
+                        : "Default (50)"}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-card bg-slate-2 border border-slate-5">
+                  <div className="text-[10px] text-slate-9 uppercase font-mono">Pre-Flight Tests</div>
+                  <div className="font-mono font-medium text-green-11 mt-1">
+                    {isLoadingSpec
+                      ? "Loading..."
+                      : specDetail?.validation_report
+                        ? `${specDetail.validation_report.tests_passed} / ${specDetail.validation_report.tests_run} Passed`
+                        : "Verified"}
+                  </div>
+                </div>
+              </div>
+
+              {/* Permitted PayPal Capabilities */}
+              <div className="p-3 rounded-card bg-slate-2 border border-slate-5 space-y-2">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-10">
+                  Permitted External Capabilities
+                </div>
+                {capabilities.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {capabilities.map((cap) => (
+                      <span
+                        key={cap.capability_id}
+                        className="px-2 py-0.5 rounded bg-blue-2 border border-blue-6/60 text-[11px] font-mono text-blue-11"
+                      >
+                        {cap.capability_id}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-ui-xs text-slate-9 font-mono">
+                    No external PayPal mutations declared.
+                  </div>
+                )}
+              </div>
+
+              {specDetail?.readiness_token && (
+                <div className="p-3 rounded-card bg-green-2/50 border border-green-6/50 flex items-center gap-2 text-ui-xs">
+                  <Lock className="h-3.5 w-3.5 text-green-9 shrink-0" />
+                  <span className="font-mono text-green-11 truncate">
+                    Sealed Token: {specDetail.readiness_token}
+                  </span>
+                </div>
+              )}
+
+              {validationErrors.length > 0 && (
+                <div className="space-y-1.5">
+                  {validationErrors.map((errMsg, idx) => (
+                    <div key={idx} className="p-2.5 rounded bg-red-2 border border-red-6 text-ui-xs text-red-11">
+                      {errMsg}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
 
       {/* Bottom Control Bar */}
       <div className="h-10 border-t border-slate-5 bg-panel px-4 flex items-center justify-between text-ui shrink-0">
         <div className="flex items-center gap-2 text-ui-sm">
-          {errorCount === 0 ? (
+          {validationErrors.length === 0 ? (
             <span className="flex items-center gap-1.5 text-green-11 font-medium">
-              <CheckCircle2 className="h-4 w-4 text-green-9" />
-              <span>Compilation verified: 0 errors</span>
+              <ShieldCheck className="h-4 w-4 text-green-9" />
+              <span>Spec sealed &amp; ready for Live Sandbox</span>
             </span>
           ) : (
             <span className="flex items-center gap-1.5 text-red-11 font-medium">
               <AlertCircle className="h-4 w-4 text-red-9" />
-              <span>{errorCount} blocking compile errors</span>
+              <span>{validationErrors.length} validation errors</span>
             </span>
           )}
         </div>
 
         <div className="flex items-center gap-2">
-          {publishFeedback && (
-            <span className="text-ui-xs text-green-11 bg-green-3 border border-green-6 px-2.5 py-1 rounded-btn font-medium">
-              {publishFeedback}
-            </span>
-          )}
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleCompile}
-            disabled={isCompiling}
-            className="flex items-center gap-1.5"
-            title="Compile intent with Gemini cascade & Tarjan graph validator"
-          >
-            {isCompiling ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
+          <Link href="/studio/new">
+            <Button variant="secondary" size="sm" className="flex items-center gap-1.5">
               <Sparkles className="h-3.5 w-3.5 text-blue-9" />
-            )}
-            <span>{isCompiling ? "Compiling..." : "Compile Intent"}</span>
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={handleRunSandbox}
-            className="flex items-center gap-1.5"
-            title="Execute compiled graph in sandbox runtime"
-          >
-            <Play className="h-3.5 w-3.5" />
-            <span>Run in sandbox</span>
-          </Button>
+              <span>New Spec in Studio</span>
+            </Button>
+          </Link>
 
           <Button
             variant="primary"
             size="sm"
-            onClick={handlePublish}
-            disabled={errorCount > 0 || isCompiling}
+            onClick={() => router.push(`/sandbox/${encodeURIComponent(agent.id)}`)}
             className="flex items-center gap-1.5 font-semibold"
           >
-            <Upload className="h-3.5 w-3.5" />
-            <span>Publish version</span>
+            <Play className="h-3.5 w-3.5" />
+            <span>Open in Live Sandbox &rarr;</span>
           </Button>
         </div>
       </div>

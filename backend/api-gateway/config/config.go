@@ -17,6 +17,7 @@ type GatewayConfig struct {
 	RateLimitPerMinute int64
 	CookieSecure       bool
 	AllowDevAuth       bool
+	FrontendURL        string
 	CORSOrigins        []string
 	Postgres           sharedconfig.PostgresConfig
 	Redis              sharedconfig.RedisConfig
@@ -69,6 +70,7 @@ func LoadGatewayConfigFromEnv() (GatewayConfig, error) {
 		RateLimitPerMinute: rateLimit,
 		CookieSecure:       os.Getenv("GATEWAY_COOKIE_SECURE") == "true",
 		AllowDevAuth:       allowDevAuth,
+		FrontendURL:        getEnvOrDefault("FRONTEND_URL", "http://localhost:3000"),
 		CORSOrigins:        corsOrigins,
 		Postgres:           pgCfg,
 		Redis:              redisCfg,

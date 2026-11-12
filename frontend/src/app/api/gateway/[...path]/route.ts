@@ -13,9 +13,9 @@ function resolveGatewayBaseUrl(): string {
 
 async function proxyToGateway(
   request: NextRequest,
-  context: { params: { path: string[] } }
+  context: { params: Promise<{ path: string[] }> }
 ): Promise<Response> {
-  const pathSegments = context.params?.path ?? [];
+  const { path: pathSegments = [] } = await context.params;
   const targetPath = pathSegments.map(encodeURIComponent).join("/");
   const targetUrl = `${resolveGatewayBaseUrl()}/${targetPath}${request.nextUrl.search}`;
 
@@ -39,16 +39,7 @@ async function proxyToGateway(
     }
   });
 
-  // Inject fallback development auth and tenant headers if not present
-  if (!forwardHeaders.has("authorization")) {
-    forwardHeaders.set("authorization", "Bearer dev_token_deltix");
-  }
-  if (!forwardHeaders.has("x-tenant-id")) {
-    forwardHeaders.set("x-tenant-id", "org_prod_442");
-  }
-  if (!forwardHeaders.has("x-user-id")) {
-    forwardHeaders.set("x-user-id", "usr_dev_finance");
-  }
+  // Never forge Bearer dev tokens or spoofed tenant headers; relay only client cookie/auth headers.
 
   const hasBody = !["GET", "HEAD"].includes(request.method.toUpperCase());
   const body = hasBody ? await request.arrayBuffer() : undefined;
@@ -93,42 +84,42 @@ async function proxyToGateway(
 
 export async function GET(
   request: NextRequest,
-  context: { params: { path: string[] } }
+  context: { params: Promise<{ path: string[] }> }
 ) {
   return proxyToGateway(request, context);
 }
 
 export async function POST(
   request: NextRequest,
-  context: { params: { path: string[] } }
+  context: { params: Promise<{ path: string[] }> }
 ) {
   return proxyToGateway(request, context);
 }
 
 export async function PUT(
   request: NextRequest,
-  context: { params: { path: string[] } }
+  context: { params: Promise<{ path: string[] }> }
 ) {
   return proxyToGateway(request, context);
 }
 
 export async function PATCH(
   request: NextRequest,
-  context: { params: { path: string[] } }
+  context: { params: Promise<{ path: string[] }> }
 ) {
   return proxyToGateway(request, context);
 }
 
 export async function DELETE(
   request: NextRequest,
-  context: { params: { path: string[] } }
+  context: { params: Promise<{ path: string[] }> }
 ) {
   return proxyToGateway(request, context);
 }
 
 export async function OPTIONS(
   request: NextRequest,
-  context: { params: { path: string[] } }
+  context: { params: Promise<{ path: string[] }> }
 ) {
   return proxyToGateway(request, context);
 }

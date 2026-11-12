@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { RunItem, RunTimelineEvent, RunStatus, AgentItem } from "@/types";
 import {
   api,
+  AuthSession,
   BackendAgentRun,
   BackendAgentSpec,
   mapBackendRunToRunItem,
@@ -13,9 +14,13 @@ interface DelTixStore {
   environment: "sandbox" | "live";
   setEnvironment: (env: "sandbox" | "live") => void;
 
-  // Selected workspace / tenant
+  // Authenticated session & workspace tenant
+  session: AuthSession | null;
+  authChecked: boolean;
   tenantId: string;
   setTenantId: (id: string) => void;
+  refreshSession: () => Promise<AuthSession | null>;
+  logout: () => Promise<void>;
 
   // Active state
   runs: RunItem[];
@@ -33,10 +38,7 @@ interface DelTixStore {
   fetchRuns: () => Promise<void>;
   fetchRunDetails: (runId: string) => Promise<RunItem | null>;
 
-  // Agent management
-  createAgent: () => AgentItem;
-  publishAgentVersion: (agentId: string) => Promise<void>;
-  createRunFromAgent: (agentId: string, inputs?: Record<string, any>) => Promise<RunItem>;
+  // Agent & run management
   retryRunFromCheckpoint: (runId: string) => Promise<void>;
 
   // Approvals actions
@@ -51,8 +53,33 @@ export const useDelTixStore = create<DelTixStore>((set, get) => ({
   environment: "sandbox",
   setEnvironment: (env) => set({ environment: env }),
 
-  tenantId: "ten_dev_workspace",
+  session: null,
+  authChecked: false,
+  tenantId: "",
   setTenantId: (id) => set({ tenantId: id }),
+
+  refreshSession: async () => {
+    api.syncOAuthCallbackFlag();
+    const session = await api.getCurrentSession();
+    set({
+      session,
+      authChecked: true,
+      tenantId: session?.tenant_id || "",
+    });
+    return session;
+  },
+
+  logout: async () => {
+    await api.logout();
+    set({
+      session: null,
+      authChecked: true,
+      tenantId: "",
+      runs: [],
+      agents: [],
+      selectedRunId: null,
+    });
+  },
 
   runs: [],
   agents: [],
@@ -66,6 +93,11 @@ export const useDelTixStore = create<DelTixStore>((set, get) => ({
   init: async () => {
     set({ isLoading: true, error: null });
     try {
+      const session = await get().refreshSession();
+      if (!session) {
+        set({ runs: [], agents: [], isLoading: false });
+        return;
+      }
       await Promise.allSettled([get().fetchAgents(), get().fetchRuns()]);
     } catch (err: any) {
       set({ error: err.message || "Failed to initialize DelTix store." });
@@ -77,10 +109,13 @@ export const useDelTixStore = create<DelTixStore>((set, get) => ({
   fetchAgents: async () => {
     try {
       const specs = await api.listSpecs();
-      const agents = specs.map(mapBackendSpecToAgentItem);
+      const runs = get().runs;
+      const agents = specs.map((spec) =>
+        mapBackendSpecToAgentItem(spec, runs.filter((r) => r.agentId === spec.spec_id).length)
+      );
       set({ agents });
     } catch (err) {
-      console.warn("DelTix: No remote agent specs loaded, using local studio buffer.", err);
+      console.warn("DelTix: Failed to fetch agent specifications.", err);
     }
   },
 
@@ -108,10 +143,14 @@ export const useDelTixStore = create<DelTixStore>((set, get) => ({
 
       set((state) => ({
         runs: mappedRuns,
+        agents: state.agents.map((a) => ({
+          ...a,
+          totalRuns: mappedRuns.filter((r) => r.agentId === a.id).length,
+        })),
         selectedRunId: state.selectedRunId || (mappedRuns.length > 0 ? mappedRuns[0].id : null),
       }));
     } catch (err) {
-      console.warn("DelTix: No remote runs loaded.", err);
+      console.warn("DelTix: Failed to fetch runs.", err);
     }
   },
 
@@ -138,114 +177,7 @@ export const useDelTixStore = create<DelTixStore>((set, get) => ({
     }
   },
 
-  createAgent: () => {
-    const newId = `agent_${Date.now()}`;
-    const newAgent: AgentItem = {
-      id: newId,
-      name: `custom-payout-agent-${newId.slice(-4)}`,
-      version: "v1.0.0",
-      description: "Custom user-authored financial workflow with deterministic AST verification.",
-      lastRunAt: new Date().toISOString(),
-      successRate: 100,
-      totalRuns: 0,
-      owner: "Finance Ops",
-      environment: get().environment,
-      definitionYaml: `name: custom-payout-agent
-version: 1.0.0
-entrypoint: ingest_invoice
-nodes:
-  - id: ingest_invoice
-    type: INGEST_DATA
-    source: raw_invoice_payload
-    next: reconcile_math
-  - id: reconcile_math
-    type: DETERMINISTIC_MATH
-    expression: "round(sum(line_items.amount), 2)"
-    next: check_policy
-  - id: check_policy
-    type: POLICY_GATE
-    rules:
-      - "amount_usd <= max_budget_usd"
-    on_exceed: require_human_approval
-    next: disburse_payout
-  - id: require_human_approval
-    type: APPROVAL
-    timeout_minutes: 1440
-    next: disburse_payout
-  - id: disburse_payout
-    type: TOOL_CALL
-    tool: paypal.batch_payout
-`,
-    };
-    set((state) => ({
-      agents: [newAgent, ...state.agents],
-    }));
-    return newAgent;
-  },
-
-  publishAgentVersion: async (agentId: string) => {
-    const agent = get().agents.find((a) => a.id === agentId);
-    if (!agent) return;
-
-    try {
-      await api.compilePrompt({
-        name: agent.name,
-        category: "financial-disbursement",
-        natural_language_prompt: agent.description || `Autonomous agent ${agent.name}`,
-      });
-      await get().fetchAgents();
-    } catch (err) {
-      console.warn("Publishing agent spec locally after backend compile returned", err);
-      set((state) => ({
-        agents: state.agents.map((a) => {
-          if (a.id !== agentId) return a;
-          const parts = a.version.replace("v", "").split(".").map(Number);
-          const nextVer = `v${parts[0] || 1}.${(parts[1] || 0) + 1}.0`;
-          return { ...a, version: nextVer };
-        }),
-      }));
-    }
-  },
-
-  createRunFromAgent: async (agentId: string, inputs: Record<string, any> = {}) => {
-    const agent = get().agents.find((a) => a.id === agentId) || get().agents[0];
-    const defaultInputs = {
-      description: `Disbursement: Invoice from ${agent ? agent.name : "Custom Agent"}`,
-      recipient_name: "Apex Logistics Corp",
-      recipient_paypal_id: "vnd_apex_4882",
-      amount_usd: 1250.0,
-      ...inputs,
-    };
-
-    try {
-      const resp = await api.startRun(agent?.id || agentId, defaultInputs);
-      const detail = await api.getRun(resp.run_id);
-      const newRun = mapBackendRunToRunItem(detail.run, detail.checkpoints || [], detail.pending_approval);
-
-      set((state) => ({
-        runs: [newRun, ...state.runs],
-        selectedRunId: newRun.id,
-      }));
-      return newRun;
-    } catch (err: any) {
-      console.error("DelTix: Real backend startRun call failed:", err);
-      throw err;
-    }
-  },
-
   retryRunFromCheckpoint: async (runId: string) => {
-    set((state) => ({
-      runs: state.runs.map((r) => {
-        if (r.id !== runId) return r;
-        return {
-          ...r,
-          status: "RUNNING" as RunStatus,
-          failureReason: undefined,
-          nodes: r.nodes.map((n) => ({ ...n, status: "running" as const })),
-        };
-      }),
-    }));
-
     try {
       const detail = await api.getRun(runId);
       const spec = get().agents.find((a) => a.id === detail.run.spec_id);
@@ -255,104 +187,24 @@ nodes:
       }));
     } catch (err) {
       console.error("DelTix: Failed to refresh run from backend:", err);
+      throw err;
     }
   },
 
   approveRun: async (runId, rationale) => {
     const run = get().runs.find((r) => r.id === runId);
-    let signedToken = `atok_live_${Math.random().toString(36).substring(2, 10)}_${Date.now()}`;
-
-    try {
-      const approvalId = run?.approvalDetails?.approvalId || (run?.approvalDetails as any)?.approval_id || runId;
-      const resp = await api.decideApproval(approvalId, "APPROVED", rationale || "Approved via DelTix Console");
-      if (resp?.approval_token) {
-        signedToken = resp.approval_token;
-      }
-      // Re-synchronize with live backend run
-      await get().fetchRunDetails(runId);
-    } catch (err) {
-      console.warn("DelTix: Remote decideApproval failed, applying local state update.", err);
-    }
-
-    set((state) => {
-      const updatedRuns = state.runs.map((r) => {
-        if (r.id !== runId) return r;
-
-        const newTimelineEvent: RunTimelineEvent = {
-          id: `evt_app_${Date.now()}`,
-          offsetSeconds: Number((r.durationMs / 1000 + 1.2).toFixed(2)),
-          eventType: "Approval granted",
-          nodeId: "approval_gate",
-          nodeTitle: "Human approval gate",
-          summary: `Approved by Controller. Signed token: ${signedToken}${rationale ? ` ("${rationale}")` : ""}`,
-          timestamp: new Date().toISOString(),
-        };
-
-        const updatedNodes = r.nodes.map((n) => {
-          if (n.type === "APPROVAL" || n.id === "approval_gate") return { ...n, status: "succeeded" as const };
-          if (n.type === "TOOL_CALL") return { ...n, status: "succeeded" as const, durationMs: 420 };
-          return n;
-        });
-
-        return {
-          ...r,
-          status: "COMPLETED" as RunStatus,
-          approvalDetails: r.approvalDetails
-            ? { ...r.approvalDetails, signedToken }
-            : undefined,
-          timeline: [...r.timeline, newTimelineEvent],
-          nodes: updatedNodes,
-        };
-      });
-
-      return { runs: updatedRuns };
-    });
-
+    const approvalId = run?.approvalDetails?.approvalId || (run?.approvalDetails as any)?.approval_id || runId;
+    const resp = await api.decideApproval(approvalId, "APPROVED", rationale || "Approved via DelTix Console");
+    const signedToken = resp?.approval_token || "";
+    await get().fetchRunDetails(runId);
     return { success: true, signedToken };
   },
 
   rejectRun: async (runId, reason) => {
     const run = get().runs.find((r) => r.id === runId);
-    try {
-      const approvalId = run?.approvalDetails?.approvalId || (run?.approvalDetails as any)?.approval_id || runId;
-      await api.decideApproval(approvalId, "REJECTED", reason);
-      // Re-synchronize with live backend run
-      await get().fetchRunDetails(runId);
-    } catch (err) {
-      console.warn("DelTix: Remote decideApproval rejection failed, applying local state update.", err);
-    }
-
-    set((state) => {
-      const updatedRuns = state.runs.map((r) => {
-        if (r.id !== runId) return r;
-
-        const newTimelineEvent: RunTimelineEvent = {
-          id: `evt_rej_${Date.now()}`,
-          offsetSeconds: Number((r.durationMs / 1000 + 0.8).toFixed(2)),
-          eventType: "Run rejected",
-          nodeId: "approval_gate",
-          nodeTitle: "Human approval gate",
-          summary: `Rejected by Controller: ${reason}`,
-          timestamp: new Date().toISOString(),
-        };
-
-        const updatedNodes = r.nodes.map((n) => {
-          if (n.type === "APPROVAL" || n.id === "approval_gate") return { ...n, status: "failed" as const, error: reason };
-          return n;
-        });
-
-        return {
-          ...r,
-          status: "REJECTED" as RunStatus,
-          failureReason: `Manual rejection: ${reason}`,
-          timeline: [...r.timeline, newTimelineEvent],
-          nodes: updatedNodes,
-        };
-      });
-
-      return { runs: updatedRuns };
-    });
-
+    const approvalId = run?.approvalDetails?.approvalId || (run?.approvalDetails as any)?.approval_id || runId;
+    await api.decideApproval(approvalId, "REJECTED", reason);
+    await get().fetchRunDetails(runId);
     return { success: true };
   },
 

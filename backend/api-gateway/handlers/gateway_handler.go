@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -80,9 +81,10 @@ func (s *PostgresUserStore) UpsertTenantAndUser(ctx context.Context, session aut
 }
 
 type GatewayHandler struct {
-	sessions     OAuthSessionProvider
-	userStore    AuthenticatedUserStore
-	cookieSecure bool
+	sessions            OAuthSessionProvider
+	userStore           AuthenticatedUserStore
+	cookieSecure        bool
+	frontendRedirectURL string
 }
 
 func NewGatewayHandler(
@@ -95,6 +97,16 @@ func NewGatewayHandler(
 		userStore:    userStore,
 		cookieSecure: cookieSecure,
 	}
+}
+
+// WithFrontendRedirectURL sets the frontend base URL used to redirect browsers after OAuth callback.
+func (h *GatewayHandler) WithFrontendRedirectURL(frontendURL string) *GatewayHandler {
+	h.frontendRedirectURL = strings.TrimRight(strings.TrimSpace(frontendURL), "/")
+	return h
+}
+
+func (h *GatewayHandler) wantsBrowserRedirect(r *http.Request) bool {
+	return h.frontendRedirectURL != "" && !strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
 // HandleHealth responds to GET /healthz.
@@ -139,9 +151,22 @@ func (h *GatewayHandler) HandleGoogleLogin(w http.ResponseWriter, r *http.Reques
 func (h *GatewayHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Request) {
 	traceID := middleware.EnsureTraceID(w, r)
 
+	if oauthErr := strings.TrimSpace(r.URL.Query().Get("error")); oauthErr != "" {
+		if h.wantsBrowserRedirect(r) {
+			http.Redirect(w, r, h.frontendRedirectURL+"/login?error="+url.QueryEscape(oauthErr), http.StatusFound)
+			return
+		}
+		middleware.WriteProblemJSON(w, http.StatusUnauthorized, "OAUTH_DENIED", "Google OAuth authorization was denied or cancelled.", traceID)
+		return
+	}
+
 	stateToken := strings.TrimSpace(r.URL.Query().Get("state"))
 	authCode := strings.TrimSpace(r.URL.Query().Get("code"))
 	if stateToken == "" || authCode == "" {
+		if h.wantsBrowserRedirect(r) {
+			http.Redirect(w, r, h.frontendRedirectURL+"/login?error=INVALID_OAUTH_CALLBACK", http.StatusFound)
+			return
+		}
 		middleware.WriteProblemJSON(w, http.StatusBadRequest, "INVALID_OAUTH_CALLBACK", "Both 'state' and 'code' query parameters are required.", traceID)
 		return
 	}
@@ -153,12 +178,20 @@ func (h *GatewayHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Req
 		if errors.Is(err, auth.ErrInvalidOAuthState) {
 			code = "INVALID_OAUTH_STATE"
 		}
+		if h.wantsBrowserRedirect(r) {
+			http.Redirect(w, r, h.frontendRedirectURL+"/login?error="+url.QueryEscape(code), http.StatusFound)
+			return
+		}
 		middleware.WriteProblemJSON(w, status, code, "Failed to verify Google OAuth callback.", traceID)
 		return
 	}
 
 	if h.userStore != nil {
 		if err := h.userStore.UpsertTenantAndUser(r.Context(), session); err != nil {
+			if h.wantsBrowserRedirect(r) {
+				http.Redirect(w, r, h.frontendRedirectURL+"/login?error=USER_PERSISTENCE_FAILED", http.StatusFound)
+				return
+			}
 			middleware.WriteProblemJSON(w, http.StatusInternalServerError, "USER_PERSISTENCE_FAILED", "Failed to persist authenticated user record.", traceID)
 			return
 		}
@@ -173,6 +206,11 @@ func (h *GatewayHandler) HandleGoogleCallback(w http.ResponseWriter, r *http.Req
 		Secure:   h.cookieSecure,
 		SameSite: http.SameSiteLaxMode,
 	})
+
+	if h.wantsBrowserRedirect(r) {
+		http.Redirect(w, r, h.frontendRedirectURL+"/dashboard?auth=google", http.StatusFound)
+		return
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"session":  session,

@@ -13,23 +13,40 @@ export function getApiBase(): string {
 /**
  * Standard headers with dev authorization fallback.
  */
+export interface AuthSession {
+  session_id: string;
+  user_id: string;
+  tenant_id: string;
+  email: string;
+  name: string;
+  picture?: string;
+  created_at?: string;
+  expires_at?: string;
+}
+
+const AUTH_MODE_KEY = "deltix_auth_mode";
+const AUTH_TOKEN_KEY = "deltix_auth_token";
+const TENANT_ID_KEY = "deltix_tenant_id";
+const USER_ID_KEY = "deltix_user_id";
+
 function getHeaders(customHeaders: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...customHeaders,
   };
 
-  // If running in development and dev token exists or requested
-  if (typeof window !== "undefined") {
-    const devToken = localStorage.getItem("deltix_auth_token") || "dev_token_deltix";
+  // Only attach dev bearer headers when the user explicitly activated Dev Sandbox mode.
+  // Google OAuth relies on the HttpOnly `deltix_session` cookie via `credentials: "include"`.
+  if (typeof window !== "undefined" && localStorage.getItem(AUTH_MODE_KEY) === "dev") {
+    const devToken = localStorage.getItem(AUTH_TOKEN_KEY);
     if (devToken) {
       headers["Authorization"] = `Bearer ${devToken}`;
     }
-    const tenantId = localStorage.getItem("deltix_tenant_id") || "org_prod_442";
+    const tenantId = localStorage.getItem(TENANT_ID_KEY);
     if (tenantId) {
       headers["X-Tenant-ID"] = tenantId;
     }
-    const userId = localStorage.getItem("deltix_user_id") || "usr_dev_finance";
+    const userId = localStorage.getItem(USER_ID_KEY);
     if (userId) {
       headers["X-User-ID"] = userId;
     }
@@ -62,6 +79,42 @@ export interface BackendTransition {
   condition?: string;
 }
 
+export interface BackendAgentIR {
+  schema?: string;
+  ir_version: string;
+  agent_id: string;
+  tenant_id: string;
+  metadata?: {
+    name: string;
+    description?: string;
+    category?: string;
+  };
+  nodes: BackendNode[];
+  transitions: BackendTransition[];
+  capabilities?: Array<{
+    capability_id: string;
+    version?: string;
+    is_mutation?: boolean;
+    is_sensitive?: boolean;
+    allowed_actions?: string[];
+  }>;
+  policies?: {
+    max_budget_usd?: number;
+    human_approval_threshold_usd?: number;
+    require_human_approval?: boolean;
+    allowed_capabilities?: string[];
+    approval_triggers?: string[];
+    forbidden_actions?: string[];
+    read_only?: boolean;
+  };
+  execution_limits?: {
+    max_steps?: number;
+    timeout_seconds?: number;
+    max_loop_iterations?: number;
+    max_consecutive_errors?: number;
+  };
+}
+
 export interface BackendAgentSpec {
   spec_id: string;
   seq_id: number;
@@ -70,32 +123,8 @@ export interface BackendAgentSpec {
   tenant_id: string;
   name: string;
   category: string;
-  agent_ir?: {
-    schema?: string;
-    ir_version: string;
-    agent_id: string;
-    tenant_id: string;
-    metadata?: {
-      name: string;
-      description?: string;
-      category?: string;
-    };
-    nodes: BackendNode[];
-    transitions: BackendTransition[];
-    capabilities?: Array<{ capability_id: string; version?: string }>;
-    policies?: {
-      max_budget_usd?: number;
-      human_approval_threshold_usd?: number;
-      allowed_capabilities?: string[];
-      read_only?: boolean;
-    };
-  };
-  ir_payload?: {
-    ir_version: string;
-    agent_name: string;
-    nodes: BackendNode[];
-    transitions: BackendTransition[];
-  };
+  agent_ir?: BackendAgentIR;
+  ir_payload?: BackendAgentIR;
   validation_report?: {
     schema_valid: boolean;
     topology_valid: boolean;
@@ -215,7 +244,7 @@ export interface CompilePromptResponse {
 /**
  * Transform a backend AgentSpec into an AgentItem.
  */
-export function mapBackendSpecToAgentItem(spec: BackendAgentSpec): AgentItem {
+export function mapBackendSpecToAgentItem(spec: BackendAgentSpec, totalRuns: number = 0): AgentItem {
   const testsPassed = spec.validation_report?.tests_passed ?? 0;
   const testsRun = spec.validation_report?.tests_run ?? 0;
   const successRate = testsRun > 0 ? Math.round((testsPassed / testsRun) * 100) : 100;
@@ -232,7 +261,7 @@ export function mapBackendSpecToAgentItem(spec: BackendAgentSpec): AgentItem {
     "nodes:",
     ...(rawNodes.length > 0
       ? rawNodes.map((n) => `  - id: ${n.id}\n    type: ${n.type}`)
-      : ["  - id: start\n    type: INGEST_DATA"]),
+      : []),
   ].join("\n");
 
   return {
@@ -242,8 +271,8 @@ export function mapBackendSpecToAgentItem(spec: BackendAgentSpec): AgentItem {
     description: `Policy-verified financial agent (${spec.category || "disbursements"}).`,
     lastRunAt: spec.updated_at || spec.created_at || new Date().toISOString(),
     successRate,
-    totalRuns: 0,
-    owner: spec.created_by || "Finance Ops",
+    totalRuns,
+    owner: spec.created_by || "Workspace Operator",
     environment: "sandbox",
     definitionYaml,
   };
@@ -268,11 +297,13 @@ export function mapBackendRunToRunItem(
 
   const counterparty = (run.inputs_payload?.recipient_name as string) ||
     (run.inputs_payload?.vendor_name as string) ||
-    "Authorized Counterparty";
+    (run.inputs_payload?.customer_email as string) ||
+    "Unspecified";
 
   const counterpartyId = (run.inputs_payload?.recipient_paypal_id as string) ||
     (run.inputs_payload?.recipient_id as string) ||
-    "sbox-recip-01";
+    (run.inputs_payload?.customer_email as string) ||
+    "—";
 
   // Build nodes from spec IR or checkpoints
   const nodes: GraphNodeData[] = [];
@@ -362,6 +393,16 @@ export function mapBackendRunToRunItem(
     fullState: cp.full_state || cp.state_snapshot || {},
   }));
 
+  const settledUSD = Number(run.cumulative_spend || 0);
+  const requestedUSD = Number(
+    pendingApproval?.amount_usd ?? run.inputs_payload?.amount_usd ?? 0
+  );
+  const effectiveUSD = settledUSD > 0 ? settledUSD : requestedUSD;
+
+  const succeededChecks = checkpoints
+    .filter((cp) => cp.status === "SUCCEEDED")
+    .map((cp) => `${cp.node_id} (${cp.node_type})`);
+
   return {
     id: run.run_id,
     title,
@@ -369,7 +410,8 @@ export function mapBackendRunToRunItem(
     agentName: spec?.name || `Agent ${run.spec_id.slice(-6)}`,
     counterparty,
     counterpartyId,
-    amountCents: Math.round((run.cumulative_spend || 0) * 100),
+    amountCents: Math.round(effectiveUSD * 100),
+    settledCents: Math.round(settledUSD * 100),
     currency: "USD",
     status: (run.status as RunStatus) || "RUNNING",
     environment: "sandbox",
@@ -381,14 +423,14 @@ export function mapBackendRunToRunItem(
           approvalId: pendingApproval.approval_id,
           capabilityId: pendingApproval.capability_id,
           requestedPayload: pendingApproval.requested_payload,
-          reason: pendingApproval.action_summary || "High-value disbursement requiring dual authorization",
-          amountCents: Math.round((pendingApproval.amount_usd || 0) * 100),
+          reason: pendingApproval.action_summary || "Human approval required before execution continues.",
+          amountCents: Math.round((Number(pendingApproval.amount_usd || 0) || requestedUSD) * 100),
           recipientName: counterparty,
           recipientAccount: counterpartyId,
-          sourceAccount: "DelTix Sandbox Treasury",
-          triggeredRule: `spend_limit_check (${pendingApproval.capability_id})`,
-          checksPassed: ["Deterministic AST Math Verification", "Grounding Quote Proof Passed", "Zero-Tolerance Variance Check"],
-          requestedBy: run.triggered_by || "System Policy Guard",
+          sourceAccount: (run.inputs_payload?.source_account as string) || "PayPal Sandbox",
+          triggeredRule: `${pendingApproval.capability_id || "policy_gate"} (node: ${pendingApproval.node_id})`,
+          checksPassed: succeededChecks,
+          requestedBy: run.triggered_by || "Runtime Policy Guard",
           waitingSince: pendingApproval.created_at,
         }
       : undefined,
@@ -427,13 +469,88 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
 export const api = {
   /**
-   * Check current session.
+   * Clear stale dev auth overrides after a browser Google OAuth callback redirect (?auth=google).
    */
-  async getCurrentSession() {
+  syncOAuthCallbackFlag() {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("auth") === "google") {
+      localStorage.removeItem(AUTH_MODE_KEY);
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(TENANT_ID_KEY);
+      localStorage.removeItem(USER_ID_KEY);
+    }
+  },
+
+  /**
+   * Check current session against API Gateway (cookie or explicit dev bearer token).
+   */
+  async getCurrentSession(): Promise<AuthSession | null> {
     try {
-      return await request<any>("/v1/auth/me", { method: "GET" });
+      const data = await request<{ session?: AuthSession } | AuthSession>("/v1/auth/me", { method: "GET" });
+      const sess = (data as { session?: AuthSession })?.session ?? (data as AuthSession);
+      if (sess && (sess.session_id || sess.user_id || sess.email)) {
+        return sess;
+      }
+      return null;
     } catch {
       return null;
+    }
+  },
+
+  /**
+   * Request the Google OAuth consent redirect URL for the selected workspace tenant.
+   */
+  async getGoogleLoginUrl(tenantId: string): Promise<string> {
+    const cleanTenant = tenantId.trim();
+    if (!cleanTenant) {
+      throw new Error("Workspace / Tenant ID is required.");
+    }
+    const data = await request<{ auth_url?: string }>(
+      `/v1/auth/google/login?tenant_id=${encodeURIComponent(cleanTenant)}`,
+      { method: "GET" }
+    );
+    if (!data?.auth_url) {
+      throw new Error("API Gateway did not return an OAuth authorization URL.");
+    }
+    return data.auth_url;
+  },
+
+  /**
+   * Explicitly opt into the Developer Sandbox workspace when allowed by gateway config.
+   */
+  async enableDevSession(tenantId: string = "ten_dev_workspace"): Promise<AuthSession> {
+    if (typeof window === "undefined") {
+      throw new Error("Dev session cannot be enabled on the server.");
+    }
+    localStorage.setItem(AUTH_MODE_KEY, "dev");
+    localStorage.setItem(AUTH_TOKEN_KEY, "dev_token_deltix");
+    localStorage.setItem(TENANT_ID_KEY, tenantId.trim() || "ten_dev_workspace");
+
+    const sess = await api.getCurrentSession();
+    if (!sess) {
+      localStorage.removeItem(AUTH_MODE_KEY);
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(TENANT_ID_KEY);
+      throw new Error("Developer auth bypass is disabled on API Gateway (GATEWAY_ALLOW_DEV_AUTH=false).");
+    }
+    return sess;
+  },
+
+  /**
+   * Revoke current OAuth session cookie and clear any local dev token state.
+   */
+  async logout(): Promise<void> {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(AUTH_MODE_KEY);
+      localStorage.removeItem(AUTH_TOKEN_KEY);
+      localStorage.removeItem(TENANT_ID_KEY);
+      localStorage.removeItem(USER_ID_KEY);
+    }
+    try {
+      await request("/v1/auth/logout", { method: "POST" });
+    } catch {
+      // Ignore network/401 errors while clearing session
     }
   },
 
@@ -449,7 +566,11 @@ export const api = {
    * Get single agent spec by ID.
    */
   async getSpec(specId: string): Promise<BackendAgentSpec> {
-    return request<BackendAgentSpec>(`/v1/agents/specs/${encodeURIComponent(specId)}`, { method: "GET" });
+    const data = await request<{ spec?: BackendAgentSpec } | BackendAgentSpec>(
+      `/v1/agents/specs/${encodeURIComponent(specId)}`,
+      { method: "GET" }
+    );
+    return (data as { spec?: BackendAgentSpec })?.spec ?? (data as BackendAgentSpec);
   },
 
   /**
@@ -474,10 +595,26 @@ export const api = {
         clarifications: promptOrReq.clarifications,
       };
     }
-    return request<CompilePromptResponse>("/v1/agents/compile", {
+    const url = `${getApiBase()}/v1/agents/compile`;
+    const res = await fetch(url, {
       method: "POST",
+      headers: getHeaders(),
+      credentials: "include",
       body: JSON.stringify(body),
     });
+
+    const data = await res.json().catch(() => null);
+    if (res.status === 422 && data && data.status === "FAILED_VALIDATION") {
+      return data as CompilePromptResponse;
+    }
+
+    if (!res.ok) {
+      const errorDetail =
+        data?.detail || data?.title || data?.error_code || data?.message || `${res.status} ${res.statusText}`;
+      throw new Error(errorDetail);
+    }
+
+    return data as CompilePromptResponse;
   },
 
   /**

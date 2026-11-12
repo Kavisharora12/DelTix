@@ -31,6 +31,7 @@ export function ApprovalDecisionPanel({ run, className }: ApprovalDecisionPanelP
   const [rejectReason, setRejectReason] = useState("");
   const [operatorNote, setOperatorNote] = useState("Verified customer evidence & compliance policy against transaction");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [signedToken, setSignedToken] = useState<string | null>(details?.signedToken || null);
   const [copied, setCopied] = useState(false);
 
@@ -40,10 +41,13 @@ export function ApprovalDecisionPanel({ run, className }: ApprovalDecisionPanelP
 
   const handleApprove = async () => {
     setIsSubmitting(true);
+    setActionError(null);
     try {
-      const res = await approveRun(run.id, operatorNote.trim() || "Verified against vendor PO & invoices");
+      const res = await approveRun(run.id, operatorNote.trim() || "Approved via DelTix Console");
       setSignedToken(res.signedToken);
       setConfirmOpen(false);
+    } catch (err: any) {
+      setActionError(err?.message || "Failed to approve disbursement.");
     } finally {
       setIsSubmitting(false);
     }
@@ -52,9 +56,12 @@ export function ApprovalDecisionPanel({ run, className }: ApprovalDecisionPanelP
   const handleReject = async () => {
     if (!rejectReason.trim()) return;
     setIsSubmitting(true);
+    setActionError(null);
     try {
       await rejectRun(run.id, rejectReason.trim());
       setRejectOpen(false);
+    } catch (err: any) {
+      setActionError(err?.message || "Failed to reject disbursement.");
     } finally {
       setIsSubmitting(false);
     }
@@ -68,25 +75,28 @@ export function ApprovalDecisionPanel({ run, className }: ApprovalDecisionPanelP
 
   // If already approved, show signed confirmation
   if (signedToken || run.status === "COMPLETED") {
+    const activeToken = signedToken || details.signedToken || "";
     return (
       <div className={cn("bg-panel border border-green-6 rounded-btn p-4 text-ui space-y-3", className)}>
         <div className="flex items-center gap-2 text-green-11 font-medium">
           <CheckCircle2 className="h-4 w-4 text-green-9" />
-          <span>Payment Authorized & Cryptographically Signed</span>
+          <span>Payment Authorized &amp; Cryptographically Signed</span>
         </div>
         <p className="text-ui-sm text-slate-11">
-          Disbursement released to PayPal Adapter. Cryptographic HMAC authorization token:
+          Approval recorded via Policy Service and run resumed cleanly.
         </p>
-        <div className="flex items-center justify-between p-2 rounded bg-slate-3 border border-slate-5 font-mono text-ui-xs text-slate-12">
-          <span className="truncate">{signedToken || details.signedToken || "atok_live_89f0e21a_signed"}</span>
-          <button
-            type="button"
-            onClick={() => handleCopyToken(signedToken || details.signedToken || "")}
-            className="text-slate-10 hover:text-slate-12 ml-2"
-          >
-            {copied ? <Check className="h-3.5 w-3.5 text-green-11" /> : <Copy className="h-3.5 w-3.5" />}
-          </button>
-        </div>
+        {activeToken && (
+          <div className="flex items-center justify-between p-2 rounded bg-slate-3 border border-slate-5 font-mono text-ui-xs text-slate-12">
+            <span className="truncate">{activeToken}</span>
+            <button
+              type="button"
+              onClick={() => handleCopyToken(activeToken)}
+              className="text-slate-10 hover:text-slate-12 ml-2"
+            >
+              {copied ? <Check className="h-3.5 w-3.5 text-green-11" /> : <Copy className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -148,17 +158,29 @@ export function ApprovalDecisionPanel({ run, className }: ApprovalDecisionPanelP
         {/* 3. Checks Passed List */}
         <div>
           <div className="text-ui-xs text-slate-10 uppercase tracking-wider font-semibold mb-2">
-            Automated verification checks passed
+            Completed pre-gate steps
           </div>
-          <ul className="space-y-1.5 text-ui-sm">
-            {details.checksPassed.map((chk, i) => (
-              <li key={i} className="flex items-start gap-2 text-slate-11">
-                <CheckCircle2 className="h-3.5 w-3.5 text-green-11 shrink-0 mt-0.5" />
-                <span>{chk}</span>
-              </li>
-            ))}
-          </ul>
+          {details.checksPassed.length > 0 ? (
+            <ul className="space-y-1.5 text-ui-sm">
+              {details.checksPassed.map((chk, i) => (
+                <li key={i} className="flex items-start gap-2 text-slate-11">
+                  <CheckCircle2 className="h-3.5 w-3.5 text-green-11 shrink-0 mt-0.5" />
+                  <span className="font-mono text-ui-xs">{chk}</span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <div className="text-ui-xs text-slate-9 font-mono">
+              Paused at initial gate check.
+            </div>
+          )}
         </div>
+
+        {actionError && (
+          <div className="p-2.5 rounded bg-red-2 border border-red-6 text-ui-xs text-red-11">
+            {actionError}
+          </div>
+        )}
 
         {/* 4. Rule that Triggered (Mono expression) */}
         <div>

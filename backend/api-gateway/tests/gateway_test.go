@@ -268,3 +268,60 @@ func TestGatewayDevAuthBypass(t *testing.T) {
 		t.Fatalf("expected dev session values, got %+v", body.Session)
 	}
 }
+
+func TestGatewayGoogleCallbackBrowserRedirect(t *testing.T) {
+	sessionStore := newFakeSessionStore()
+	userStore := &noopUserStore{}
+	rateLimiter := newFakeRateLimiter()
+	authMW := middleware.NewAuthMiddleware(sessionStore)
+	rateMW := middleware.NewRateLimitMiddleware(rateLimiter, 100)
+	handler := handlers.NewGatewayHandler(sessionStore, userStore, false).
+		WithFrontendRedirectURL("http://localhost:3000")
+	router := routes.NewRouter(handler, authMW, rateMW)
+
+	t.Run("sets cookie and redirects browser to dashboard on success", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/auth/google/callback?state=valid_state&code=valid_code", nil)
+		req.Header.Set("Accept", "text/html,application/xhtml+xml")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusFound {
+			t.Fatalf("expected 302 redirect, got %d (%s)", rec.Code, rec.Body.String())
+		}
+		if loc := rec.Header().Get("Location"); loc != "http://localhost:3000/dashboard?auth=google" {
+			t.Fatalf("unexpected Location header: %q", loc)
+		}
+		cookies := rec.Result().Cookies()
+		if len(cookies) == 0 || cookies[0].Name != middleware.SessionCookieName || cookies[0].Value != "sess_123" {
+			t.Fatalf("expected %s session cookie, got %+v", middleware.SessionCookieName, cookies)
+		}
+	})
+
+	t.Run("redirects browser to login with error on access_denied", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/auth/google/callback?error=access_denied", nil)
+		req.Header.Set("Accept", "text/html")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusFound {
+			t.Fatalf("expected 302 redirect, got %d", rec.Code)
+		}
+		if loc := rec.Header().Get("Location"); loc != "http://localhost:3000/login?error=access_denied" {
+			t.Fatalf("unexpected error Location: %q", loc)
+		}
+	})
+
+	t.Run("returns JSON when Accept application/json", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/v1/auth/google/callback?state=valid_state&code=valid_code", nil)
+		req.Header.Set("Accept", "application/json")
+		rec := httptest.NewRecorder()
+
+		router.ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("expected 200 OK, got %d", rec.Code)
+		}
+	})
+}

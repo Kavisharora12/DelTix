@@ -183,11 +183,11 @@ export function Sidebar() {
       <div className="p-3 border-t border-slate-5 text-[11px] text-slate-10">
         {!collapsed ? (
           <div className="flex items-center justify-between">
-            <span className="font-mono">v1.2.0-rc</span>
-            <span className="text-slate-9">gRPC / IR v1</span>
+            <span className="font-mono">DelTix v1.0</span>
+            <span className="text-slate-9">PayPal Sandbox</span>
           </div>
         ) : (
-          <div className="text-center font-mono">v1.2</div>
+          <div className="text-center font-mono">v1.0</div>
         )}
       </div>
     </aside>

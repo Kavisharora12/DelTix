@@ -42,6 +42,7 @@ services:
       - .env
     environment:
       # Internal container service discovery DNS URLs (non-secret network topology)
+      FRONTEND_URL: http://localhost:3000
       COMPILER_SERVICE_URL: http://agent-compiler-service:8081
       RUNTIME_SERVICE_URL: http://agent-runtime-service:8082
       CAPABILITY_POLICY_SERVICE_URL: http://capability-policy-service:8084

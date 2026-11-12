@@ -40,6 +40,26 @@ interface SandboxClientProps {
   initialSpecId?: string;
 }
 
+function formatCheckpointSummary(output: unknown): string | null {
+  if (!output || typeof output !== "object") return null;
+  const obj = output as Record<string, any>;
+  if (typeof obj.error === "string") {
+    const rawErr = obj.error;
+    // Extract clean PayPal API message if nested inside tool dispatch error
+    const paypalMsgMatch = rawErr.match(/"message"\s*:\s*"([^"]+)"/);
+    const paypalNameMatch = rawErr.match(/"name"\s*:\s*"([^"]+)"/);
+    if (paypalNameMatch || paypalMsgMatch) {
+      return `${paypalNameMatch?.[1] || "PayPal Error"}: ${paypalMsgMatch?.[1] || rawErr}`;
+    }
+    return rawErr;
+  }
+  if (typeof obj.message === "string") return obj.message;
+  if (typeof obj.status === "string") return `Step result: ${obj.status}`;
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return null;
+  return keys.map((k) => `${k}: ${String(obj[k])}`).join(" • ");
+}
+
 export function SandboxClient({ initialSpecId }: SandboxClientProps) {
   const { runs, fetchRuns } = useDelTixStore();
 
@@ -185,13 +205,16 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
         setStateSnapshot(startResp.run.state_payload);
       }
 
+      const specPolicies = (selectedSpec?.ir_payload || selectedSpec?.agent_ir)?.policies;
+      const specBudget = specPolicies?.max_budget_usd;
+
       // Add system confirmation
       setMessages((prev) => [
         ...prev,
         {
           id: `run_start_${Date.now()}`,
           sender: "system",
-          text: `Run dispatched: ${runId} (Target: PayPal Sandbox &bull; Budget: $500.00)`,
+          text: `Run dispatched: ${runId} (Target: PayPal Sandbox${specBudget ? ` • Budget Cap: $${Number(specBudget).toFixed(2)}` : ""})`,
           timestamp: new Date().toLocaleTimeString(),
         },
       ]);
@@ -264,19 +287,23 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
               {
                 id: `appr_wait_${Date.now()}`,
                 sender: "system",
-                text: `⚠️ Human Approval Required: Amount ($${detail.pending_approval?.amount_usd?.toFixed(2)}) exceeds threshold ($50.00). Execution safely suspended.`,
+                text: `Human Approval Required: Amount ($${Number(detail.pending_approval?.amount_usd || 0).toFixed(2)} USD) requires operator sign-off before execution continues.`,
                 timestamp: new Date().toLocaleTimeString(),
               },
             ]);
           }
 
           if (currentStatus === "COMPLETED") {
+            const spent = Number(detail.run.cumulative_spend || 0);
             setMessages((prev) => [
               ...prev,
               {
                 id: `comp_${Date.now()}`,
                 sender: "agent",
-                text: `Transaction finalized. Payment of $${(detail.run.cumulative_spend || parsedAmount).toFixed(2)} USD successfully disbursed via PayPal.`,
+                text:
+                  spent > 0
+                    ? `Transaction finalized. Payment of $${spent.toFixed(2)} USD executed via PayPal Sandbox.`
+                    : `Run completed cleanly with $0.00 USD disbursed.`,
                 timestamp: new Date().toLocaleTimeString(),
               },
             ]);
@@ -604,12 +631,28 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
 
                   <div className="text-[11px] text-slate-10 flex items-center justify-between font-mono">
                     <span>Duration: {cp.duration_ms}ms</span>
-                    <span className="text-green-11 font-medium">{cp.status}</span>
+                    <span
+                      className={
+                        cp.status === "FAILED"
+                          ? "text-red-11 font-medium"
+                          : cp.status === "SUCCEEDED"
+                            ? "text-green-11 font-medium"
+                            : "text-amber-11 font-medium"
+                      }
+                    >
+                      {cp.status}
+                    </span>
                   </div>
 
-                  {cp.node_output && (
-                    <div className="p-2 rounded bg-slate-2 border border-slate-5 text-[11px] font-mono text-slate-11 overflow-x-auto max-h-20">
-                      {JSON.stringify(cp.node_output)}
+                  {formatCheckpointSummary(cp.node_output) && (
+                    <div
+                      className={
+                        cp.status === "FAILED"
+                          ? "p-2 rounded bg-red-2/60 border border-red-6/50 text-[11px] text-red-11 leading-relaxed break-words"
+                          : "p-2 rounded bg-slate-2 border border-slate-5 text-[11px] text-slate-11 leading-relaxed break-words"
+                      }
+                    >
+                      {formatCheckpointSummary(cp.node_output)}
                     </div>
                   )}
                 </div>
@@ -658,18 +701,29 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
             </div>
           </div>
 
-          {/* State Variables JSON Snapshot */}
+          {/* Readable Execution Inputs & Variables */}
           <div className="flex-1 flex flex-col min-h-0">
             <div className="text-xs font-medium text-slate-12 mb-1.5 flex items-center justify-between">
-              <span>Live Variables Snapshot</span>
-              <span className="text-[10px] font-mono text-slate-9">JSON State</span>
+              <span>Run Inputs &amp; State</span>
+              <span className="text-[10px] font-mono text-slate-9">Step Telemetry</span>
             </div>
-            <div className="flex-1 p-3 rounded-card bg-slate-2 border border-slate-5 font-mono text-[11px] text-slate-11 overflow-auto max-h-56 leading-relaxed select-text">
+            <div className="flex-1 p-3 rounded-card bg-slate-2 border border-slate-5 text-[11px] text-slate-11 overflow-auto max-h-56 space-y-1.5">
               {Object.keys(stateSnapshot).length > 0 ? (
-                <pre>{JSON.stringify(stateSnapshot, null, 2)}</pre>
+                Object.entries(
+                  (stateSnapshot.inputs && typeof stateSnapshot.inputs === "object"
+                    ? { ...stateSnapshot.inputs, ...(stateSnapshot.variables || {}) }
+                    : stateSnapshot) as Record<string, unknown>
+                )
+                  .filter(([, v]) => v !== undefined && v !== null && typeof v !== "object")
+                  .map(([key, val]) => (
+                    <div key={key} className="flex items-center justify-between gap-2 border-b border-slate-5/50 pb-1 last:border-0">
+                      <span className="font-mono text-slate-9 truncate">{key}</span>
+                      <span className="font-mono text-slate-12 truncate max-w-[180px]">{String(val)}</span>
+                    </div>
+                  ))
               ) : (
                 <div className="text-slate-8 italic">
-                  No active state snapshot. Run an execution to inspect live variables.
+                  Send a test trigger to inspect live run variables.
                 </div>
               )}
             </div>
@@ -682,10 +736,20 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
               <span>Mem0 Persistent Memory Context</span>
             </div>
             <div className="text-[11px] text-slate-10 space-y-1 font-mono">
-              <div>User: {customerEmail}</div>
-              <div>Trust Score: 0.98 (High Trust)</div>
-              <div>Historical Refunds: 1 ($24.00)</div>
-              <div>Dispute Risk: Low (Fail-Closed Validated)</div>
+              <div>User: {customerEmail || "Not specified"}</div>
+              <div>
+                Retrieved Records:{" "}
+                {Array.isArray(stateSnapshot.memory_context) ? stateSnapshot.memory_context.length : 0}
+              </div>
+              {Array.isArray(stateSnapshot.memory_context) && stateSnapshot.memory_context.length > 0 ? (
+                <div className="text-green-11">
+                  Loaded from Supabase pgvector for this run
+                </div>
+              ) : (
+                <div className="text-slate-9">
+                  No prior memories loaded for this run yet.
+                </div>
+              )}
             </div>
           </div>
         </div>

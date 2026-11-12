@@ -164,7 +164,7 @@ def load_memory_config_from_env() -> MemoryConfig:
     )
 
     return MemoryConfig(
-        http_port=int(os.getenv("MEMORY_SERVICE_PORT", "8083")),
+        http_port=int(os.getenv("MEMORY_HTTP_PORT") or os.getenv("MEMORY_SERVICE_PORT", "8083")),
         mem0_api_key=mem0_key,
         database_host=db_host,
         database_port=db_port,

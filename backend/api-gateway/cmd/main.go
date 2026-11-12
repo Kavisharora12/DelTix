@@ -68,7 +68,8 @@ func run(logger *slog.Logger) error {
 	authMiddleware := middleware.NewAuthMiddlewareWithDevAuth(sessionManager, cfg.AllowDevAuth)
 	rateLimitMiddleware := middleware.NewRateLimitMiddleware(redisClient, cfg.RateLimitPerMinute)
 	corsMiddleware := middleware.NewCORSMiddleware(cfg.CORSOrigins)
-	gatewayHandler := handlers.NewGatewayHandler(sessionManager, userStore, cfg.CookieSecure)
+	gatewayHandler := handlers.NewGatewayHandler(sessionManager, userStore, cfg.CookieSecure).
+		WithFrontendRedirectURL(cfg.FrontendURL)
 
 	router := routes.NewRouter(
 		gatewayHandler,

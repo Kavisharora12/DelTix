@@ -10,22 +10,33 @@ import { useDelTixStore } from "@/lib/store";
 export default function LedgerPage() {
   const { runs } = useDelTixStore();
 
-  // Derive settlement ledger from completed and settled runs
+  // Derive ledger entries from actual runs with settled spend or pending approvals
   const entries: LedgerEntryItem[] = useMemo(() => {
     return runs
-      .filter((r) => r.status === "COMPLETED" || r.status === "PAUSED_FOR_APPROVAL")
-      .map((r, i) => ({
-        id: `led_${r.id.slice(-8)}_${i}`,
-        runId: r.id,
-        referenceId: `REF-${r.id.slice(-6).toUpperCase()}`,
-        counterparty: r.counterparty,
-        amountCents: r.amountCents,
-        currency: r.currency,
-        disbursementMethod: "PayPal Sandbox Payouts",
-        idempotencyKey: `idem_sha256_${r.id.slice(-12)}`,
-        reconciliationStatus: r.status === "COMPLETED" ? ("reconciled" as const) : ("pending" as const),
-        timestamp: r.startedAt,
-      }));
+      .filter((r) => (r.settledCents ?? 0) > 0 || r.status === "PAUSED_FOR_APPROVAL")
+      .map((r) => {
+        const checkpointOutputs = r.timeline
+          .map((t) => t.payload)
+          .filter((p): p is Record<string, any> => Boolean(p && typeof p === "object"));
+        const realIdemKey =
+          checkpointOutputs.find((p) => typeof p.idempotency_key === "string")?.idempotency_key ||
+          "—";
+        const amountCents =
+          r.status === "PAUSED_FOR_APPROVAL" ? r.amountCents : (r.settledCents ?? 0);
+
+        return {
+          id: `led_${r.id}`,
+          runId: r.id,
+          referenceId: r.id,
+          counterparty: r.counterparty,
+          amountCents,
+          currency: r.currency,
+          disbursementMethod: "PayPal Sandbox",
+          idempotencyKey: realIdemKey,
+          reconciliationStatus: r.status === "COMPLETED" ? ("reconciled" as const) : ("pending" as const),
+          timestamp: r.startedAt,
+        };
+      });
   }, [runs]);
 
   const handleExportCSV = () => {

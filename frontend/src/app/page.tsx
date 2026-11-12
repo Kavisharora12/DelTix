@@ -123,7 +123,7 @@ export default function LandingPage() {
             Book Demo
           </Button>
 
-          <Link href="/dashboard">
+          <Link href="/login">
             <Button
               variant="primary"
               size="sm"

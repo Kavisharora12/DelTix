@@ -21,7 +21,6 @@ import {
   AlertTriangle,
   FileCheck,
 } from "lucide-react";
-import { AppShell } from "@/components/shell/app-shell";
 import { Button } from "@/components/ui/button";
 import { api, CompilePromptResponse, ClarificationQuestion, SyntheticTestResult } from "@/lib/api";
 import { useDelTixStore } from "@/lib/store";
@@ -35,42 +34,25 @@ interface ExampleTemplate {
   tools: string[];
 }
 
-const TEMPLATES: Record<string, ExampleTemplate> = {
-  ecommerce_refund: {
-    name: "E-Commerce Automated Refund Agent",
+const TEMPLATES: Record<string, ExampleTemplate & { applyQuickSettings?: boolean }> = {
+  blank: {
+    name: "",
+    category: "financial-disbursement",
+    prompt: "",
+    spendCap: 0,
+    approvalThreshold: 0,
+    tools: [],
+    applyQuickSettings: false,
+  },
+  dummy_template: {
+    name: "Dummy Template — PayPal Refund Agent",
     category: "customer-service-refunds",
     prompt:
-      "When a customer requests a refund with order_id and reason, verify PayPal capture status. If capture is COMPLETED and total amount is <= $50.00 USD, refund automatically via PayPal. If amount is > $50.00 USD, pause and require human finance manager approval. Deduct 5% restocking fee using exact Decimal arithmetic. Do not exceed max spend of $500.00 USD per run.",
+      "When a customer requests a refund with order_id and reason, verify PayPal transaction status using paypal.transaction.search. If transaction is COMPLETED and amount is <= $50.00 USD, refund automatically via paypal.payment.refund. If amount is > $50.00 USD, pause and require human finance manager approval. Deduct 5% restocking fee using exact Decimal arithmetic. Do not exceed max spend of $500.00 USD per run.",
     spendCap: 500,
     approvalThreshold: 50,
-    tools: ["paypal_get_capture", "paypal_refund_capture", "return_policy_rag"],
-  },
-  vendor_payable: {
-    name: "Vendor Invoice & Accounts Payable Agent",
-    category: "accounts-payable",
-    prompt:
-      "Ingest incoming vendor invoice with vendor_id, invoice_id, and line_items. Verify line item subtotal sums to total using exact Decimal math. Check whether vendor bank account is verified. If total <= $250.00 USD, disburse payment via PayPal Payouts. If total > $250.00 USD, hold disbursement and require Controller approval. Maximum budget limit is $2500.00 USD.",
-    spendCap: 2500,
-    approvalThreshold: 250,
-    tools: ["paypal_get_capture", "paypal_refund_capture"],
-  },
-  dispute_mitigation: {
-    name: "Chargeback & Dispute Mitigation Agent",
-    category: "dispute-resolution",
-    prompt:
-      "Inspect inbound chargeback notification from PayPal. Query customer support transcript for delivery confirmation and signed tracking number. Ground reason against refund policy. If dispute claim is under $40.00 USD and customer has high trust score, issue merchant concession credit. Otherwise escalate to human risk officer.",
-    spendCap: 400,
-    approvalThreshold: 40,
-    tools: ["paypal_get_capture", "return_policy_rag"],
-  },
-  saas_proration: {
-    name: "Monthly SaaS Proration & Credit Agent",
-    category: "subscription-billing",
-    prompt:
-      "When subscriber downgrades plan mid-cycle, calculate exact daily proration credit using 30-day denominator Decimal AST. Verify subscription state. Issue proration credit to balance if amount <= $100.00 USD. If refund requested to original payment method and exceeds $100.00 USD, require manager review.",
-    spendCap: 1000,
-    approvalThreshold: 100,
-    tools: ["paypal_get_capture", "paypal_refund_capture"],
+    tools: ["paypal.transaction.search", "paypal.payment.refund"],
+    applyQuickSettings: true,
   },
 };
 
@@ -78,12 +60,13 @@ export default function StudioNewPage() {
   const router = useRouter();
   const { fetchAgents } = useDelTixStore();
 
-  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>("ecommerce_refund");
-  const [agentName, setAgentName] = useState<string>(TEMPLATES.ecommerce_refund.name);
-  const [promptText, setPromptText] = useState<string>(TEMPLATES.ecommerce_refund.prompt);
-  const [spendCap, setSpendCap] = useState<number>(TEMPLATES.ecommerce_refund.spendCap);
-  const [approvalThreshold, setApprovalThreshold] = useState<number>(TEMPLATES.ecommerce_refund.approvalThreshold);
-  const [selectedTools, setSelectedTools] = useState<string[]>(TEMPLATES.ecommerce_refund.tools);
+  const [selectedTemplateKey, setSelectedTemplateKey] = useState<string>("blank");
+  const [agentName, setAgentName] = useState<string>(TEMPLATES.blank.name);
+  const [promptText, setPromptText] = useState<string>(TEMPLATES.blank.prompt);
+  const [spendCap, setSpendCap] = useState<number>(TEMPLATES.blank.spendCap);
+  const [approvalThreshold, setApprovalThreshold] = useState<number>(TEMPLATES.blank.approvalThreshold);
+  const [selectedTools, setSelectedTools] = useState<string[]>(TEMPLATES.blank.tools);
+  const [applyQuickSettings, setApplyQuickSettings] = useState<boolean>(false);
 
   const [isCompiling, setIsCompiling] = useState(false);
   const [compileResult, setCompileResult] = useState<CompilePromptResponse | null>(null);
@@ -102,6 +85,8 @@ export default function StudioNewPage() {
       setSpendCap(tmpl.spendCap);
       setApprovalThreshold(tmpl.approvalThreshold);
       setSelectedTools(tmpl.tools);
+      setApplyQuickSettings(tmpl.applyQuickSettings ?? true);
+      setClarificationAnswers({});
       setCompileResult(null);
       setErrorMsg(null);
     }
@@ -117,15 +102,27 @@ export default function StudioNewPage() {
     setIsCompiling(true);
     setErrorMsg(null);
 
-    // Build enhanced prompt that includes quick settings explicitly
     const finalPrompt = promptText.trim();
+    const drawerAnswers =
+      clarificationsOverride ||
+      (Object.keys(clarificationAnswers).length > 0 ? clarificationAnswers : undefined);
+
+    const effectiveClarifications: Record<string, string> | undefined = drawerAnswers
+      ? drawerAnswers
+      : applyQuickSettings && (spendCap > 0 || approvalThreshold > 0 || selectedTools.length > 0)
+        ? {
+            ...(spendCap > 0 ? { max_budget_usd: `$${spendCap} USD` } : {}),
+            ...(approvalThreshold > 0 ? { approval_threshold_usd: `$${approvalThreshold} USD` } : {}),
+            ...(selectedTools.length > 0 ? { permitted_capabilities: selectedTools.join(", ") } : {}),
+          }
+        : undefined;
 
     try {
       const resp = await api.compilePrompt({
         name: agentName,
         category: TEMPLATES[selectedTemplateKey]?.category || "financial-disbursement",
         natural_language_prompt: finalPrompt,
-        clarifications: clarificationsOverride || (Object.keys(clarificationAnswers).length > 0 ? clarificationAnswers : undefined),
+        clarifications: effectiveClarifications,
       });
 
       setCompileResult(resp);
@@ -168,8 +165,7 @@ export default function StudioNewPage() {
   const nodes = compileResult?.agent_ir?.nodes || [];
 
   return (
-    <AppShell>
-      <div className="flex-1 flex flex-col h-full bg-slate-1 overflow-hidden relative">
+    <div className="flex-1 flex flex-col h-full bg-slate-1 overflow-hidden relative">
         {/* Top Header */}
         <div className="h-12 border-b border-slate-5 bg-panel px-6 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2">
@@ -187,10 +183,8 @@ export default function StudioNewPage() {
               onChange={(e) => handleSelectTemplate(e.target.value)}
               className="bg-slate-3 border border-slate-5 rounded-btn px-2.5 py-1 text-xs text-slate-12 focus:outline-none focus:border-slate-8"
             >
-              <option value="ecommerce_refund">E-Commerce Automated Refund Agent</option>
-              <option value="vendor_payable">Vendor Invoice & Accounts Payable</option>
-              <option value="dispute_mitigation">Chargeback & Dispute Mitigation</option>
-              <option value="saas_proration">Monthly SaaS Proration & Credit</option>
+              <option value="blank">Write Your Own (Blank)</option>
+              <option value="dummy_template">Dummy Template</option>
             </select>
           </div>
         </div>
@@ -230,13 +224,19 @@ export default function StudioNewPage() {
               />
             </div>
 
-            {/* Quick Settings (Auto-Synced with Financial Bounds) */}
+            {/* Quick Settings (Optionally Sent as Explicit Compiler Constraints) */}
             <div className="p-4 bg-slate-2/60 border border-slate-5 rounded-card space-y-4">
-              <div className="text-xs font-semibold text-slate-11 uppercase tracking-wider flex items-center justify-between">
+              <div className="text-xs font-semibold text-slate-11 uppercase tracking-wider flex items-center justify-between gap-2">
                 <span>Quick Financial Settings</span>
-                <span className="text-[11px] font-normal text-slate-9 lowercase">
-                  auto-synchronized with compiler IR
-                </span>
+                <label className="flex items-center gap-1.5 text-[11px] font-normal text-slate-10 cursor-pointer lowercase">
+                  <input
+                    type="checkbox"
+                    checked={applyQuickSettings}
+                    onChange={(e) => setApplyQuickSettings(e.target.checked)}
+                    className="rounded border-slate-6"
+                  />
+                  <span>send limits to compiler</span>
+                </label>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -277,9 +277,9 @@ export default function StudioNewPage() {
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {[
-                    { id: "paypal_get_capture", label: "PayPal: Get Capture" },
-                    { id: "paypal_refund_capture", label: "PayPal: Refund Capture" },
-                    { id: "return_policy_rag", label: "Return Policy Grounding" },
+                    { id: "paypal.transaction.search", label: "paypal.transaction.search" },
+                    { id: "paypal.payment.refund", label: "paypal.payment.refund" },
+                    { id: "paypal.invoice.create", label: "paypal.invoice.create" },
                   ].map((tool) => (
                     <button
                       key={tool.id}
@@ -379,15 +379,29 @@ export default function StudioNewPage() {
 
               <div className="grid grid-cols-2 gap-2 text-xs">
                 <div className="p-2.5 rounded bg-slate-2 border border-slate-5">
-                  <div className="text-[11px] text-slate-9 uppercase font-mono">Spend Cap</div>
+                  <div className="text-[11px] text-slate-9 uppercase font-mono">
+                    {compileResult?.agent_ir?.policies ? "Sealed Spend Cap" : "Draft Spend Cap"}
+                  </div>
                   <div className="font-mono font-medium text-slate-12 mt-0.5">
-                    ${spendCap.toFixed(2)} USD / run
+                    {compileResult?.agent_ir?.policies
+                      ? `$${Number(compileResult.agent_ir.policies.max_budget_usd ?? 0).toFixed(2)} USD / run`
+                      : applyQuickSettings && spendCap > 0
+                        ? `$${spendCap.toFixed(2)} USD / run`
+                        : "Unset (Compiler asks)"}
                   </div>
                 </div>
                 <div className="p-2.5 rounded bg-slate-2 border border-slate-5">
-                  <div className="text-[11px] text-slate-9 uppercase font-mono">Approval Gate</div>
+                  <div className="text-[11px] text-slate-9 uppercase font-mono">
+                    {compileResult?.agent_ir?.policies ? "Sealed Approval Gate" : "Draft Approval Gate"}
+                  </div>
                   <div className="font-mono font-medium text-slate-12 mt-0.5">
-                    Above ${approvalThreshold.toFixed(2)} USD
+                    {compileResult?.agent_ir?.policies
+                      ? compileResult.agent_ir.policies.require_human_approval
+                        ? `Human Sign-Off${approvalThreshold > 0 && applyQuickSettings ? ` (> $${approvalThreshold.toFixed(2)})` : ""}`
+                        : "Auto-Execute"
+                      : applyQuickSettings && approvalThreshold > 0
+                        ? `Above $${approvalThreshold.toFixed(2)} USD`
+                        : "Unset (Compiler asks)"}
                   </div>
                 </div>
                 <div className="p-2.5 rounded bg-slate-2 border border-slate-5">
@@ -404,6 +418,25 @@ export default function StudioNewPage() {
                 </div>
               </div>
             </div>
+
+            {/* Validation Errors Breakdown (on FAILED_VALIDATION) */}
+            {compileResult?.status === "FAILED_VALIDATION" &&
+              compileResult.validation_report?.errors &&
+              compileResult.validation_report.errors.length > 0 && (
+                <div className="bg-red-2 border border-red-6 rounded-card p-4 space-y-2">
+                  <div className="text-xs font-semibold text-red-11 flex items-center gap-1.5">
+                    <XCircle className="h-4 w-4 text-red-9 shrink-0" />
+                    <span>Validation Guardrail Rejections ({compileResult.validation_report.errors.length})</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {compileResult.validation_report.errors.map((errText, idx) => (
+                      <div key={idx} className="text-xs font-mono text-red-11 bg-panel/60 border border-red-6/40 rounded p-2">
+                        {errText}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
             {/* Pre-Flight Test Scorecard */}
             {compileResult?.synthetic_tests && compileResult.synthetic_tests.length > 0 && (
@@ -640,7 +673,6 @@ export default function StudioNewPage() {
             </div>
           </div>
         )}
-      </div>
-    </AppShell>
+    </div>
   );
 }

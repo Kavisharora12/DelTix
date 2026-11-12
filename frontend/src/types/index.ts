@@ -87,7 +87,8 @@ export interface RunItem {
   agentName: string;
   counterparty: string;
   counterpartyId: string;
-  amountCents: number; // in cents for precise tabular rendering
+  amountCents: number; // requested or settled amount in cents
+  settledCents?: number; // actual settled disbursement in cents (from backend cumulative_spend)
   currency: string;
   status: RunStatus;
   environment: "sandbox" | "live";
