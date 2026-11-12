@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -431,7 +432,11 @@ func (s *RuntimeService) persistWorkerOutcome(
 		if capErr != nil {
 			return runtimemodels.RunDetailResponse{}, capErr
 		}
-		amountUSD := extractAmountUSD(workerResp.Variables)
+		var inputsMap map[string]interface{}
+		if len(run.InputsPayload) > 0 {
+			_ = json.Unmarshal(run.InputsPayload, &inputsMap)
+		}
+		amountUSD := extractAmountUSD(workerResp.Variables, inputsMap)
 		reqBytes, _ := json.Marshal(workerResp.Variables)
 		tokenSeed := s.idGenerator("thash")
 		approvalReq := sharedmodels.ApprovalRequest{
@@ -541,12 +546,36 @@ func resolveTargetCapabilityForPausedNode(
 	return "", fmt.Errorf("paused node %q has no downstream capability configured in AgentIR", pausedNodeID)
 }
 
-func extractAmountUSD(vars map[string]interface{}) float64 {
-	if vars == nil {
-		return 0.0
-	}
-	if v, ok := vars["amount_usd"].(float64); ok {
-		return v
+func extractAmountUSD(sources ...map[string]interface{}) float64 {
+	keys := []string{"amount_usd", "amount"}
+	for _, src := range sources {
+		if src == nil {
+			continue
+		}
+		for _, k := range keys {
+			raw, exists := src[k]
+			if !exists || raw == nil {
+				continue
+			}
+			switch v := raw.(type) {
+			case float64:
+				if v > 0 {
+					return v
+				}
+			case int:
+				if v > 0 {
+					return float64(v)
+				}
+			case int64:
+				if v > 0 {
+					return float64(v)
+				}
+			case string:
+				if parsed, err := strconv.ParseFloat(strings.TrimSpace(v), 64); err == nil && parsed > 0 {
+					return parsed
+				}
+			}
+		}
 	}
 	return 0.0
 }

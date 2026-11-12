@@ -18,10 +18,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isPublicRoute = pathname === "/" || pathname.startsWith("/login");
 
   useEffect(() => {
-    if (!isPublicRoute) {
+    if (isPublicRoute) return;
+    const isOAuthReturn =
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("auth") === "google";
+    if (!authChecked || isOAuthReturn) {
       init();
     }
-  }, [init, isPublicRoute]);
+  }, [authChecked, init, isPublicRoute, pathname]);
 
   useEffect(() => {
     if (!isPublicRoute && authChecked && !session) {

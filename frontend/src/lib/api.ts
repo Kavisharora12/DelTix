@@ -394,9 +394,15 @@ export function mapBackendRunToRunItem(
   }));
 
   const settledUSD = Number(run.cumulative_spend || 0);
-  const requestedUSD = Number(
-    pendingApproval?.amount_usd ?? run.inputs_payload?.amount_usd ?? 0
+  const approvalUSD = Number(pendingApproval?.amount_usd || 0);
+  const payloadUSD = Number(
+    pendingApproval?.requested_payload?.amount_usd ??
+      pendingApproval?.requested_payload?.amount ??
+      run.inputs_payload?.amount_usd ??
+      run.inputs_payload?.amount ??
+      0
   );
+  const requestedUSD = approvalUSD > 0 ? approvalUSD : payloadUSD;
   const effectiveUSD = settledUSD > 0 ? settledUSD : requestedUSD;
 
   const succeededChecks = checkpoints
@@ -484,18 +490,28 @@ export const api = {
 
   /**
    * Check current session against API Gateway (cookie or explicit dev bearer token).
+   * Returns null only on 401/403; throws on transient 5xx/network errors so callers don't force logout.
    */
   async getCurrentSession(): Promise<AuthSession | null> {
-    try {
-      const data = await request<{ session?: AuthSession } | AuthSession>("/v1/auth/me", { method: "GET" });
-      const sess = (data as { session?: AuthSession })?.session ?? (data as AuthSession);
-      if (sess && (sess.session_id || sess.user_id || sess.email)) {
-        return sess;
-      }
-      return null;
-    } catch {
+    const res = await fetch(`${getApiBase()}/v1/auth/me`, {
+      method: "GET",
+      headers: getHeaders(),
+      credentials: "include",
+    });
+
+    if (res.status === 401 || res.status === 403) {
       return null;
     }
+    if (!res.ok) {
+      throw new Error(`Session check failed with HTTP ${res.status}`);
+    }
+
+    const data = (await res.json()) as { session?: AuthSession } | AuthSession;
+    const sess = (data as { session?: AuthSession })?.session ?? (data as AuthSession);
+    if (sess && (sess.session_id || sess.user_id || sess.email)) {
+      return sess;
+    }
+    return null;
   },
 
   /**

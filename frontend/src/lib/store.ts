@@ -62,13 +62,22 @@ export const useDelTixStore = create<DelTixStore>((set, get) => ({
 
   refreshSession: async () => {
     api.syncOAuthCallbackFlag();
-    const session = await api.getCurrentSession();
-    set({
-      session,
-      authChecked: true,
-      tenantId: session?.tenant_id || "",
-    });
-    return session;
+    try {
+      const session = await api.getCurrentSession();
+      set({
+        session,
+        authChecked: true,
+        tenantId: session?.tenant_id || "",
+      });
+      return session;
+    } catch (err) {
+      const existing = get().session;
+      set({
+        authChecked: true,
+        error: err instanceof Error ? err.message : "Failed to verify session",
+      });
+      return existing;
+    }
   },
 
   logout: async () => {
