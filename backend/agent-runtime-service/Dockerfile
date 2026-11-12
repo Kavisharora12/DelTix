@@ -10,11 +10,13 @@ WORKDIR /src
 
 RUN apk add --no-cache ca-certificates
 
+ENV GOPROXY=https://goproxy.io,https://proxy.golang.org,direct
+
 # Cache dependencies
 COPY backend/shared/go.mod backend/shared/go.sum ./backend/shared/
 COPY backend/agent-runtime-service/go.mod backend/agent-runtime-service/go.sum ./backend/agent-runtime-service/
 WORKDIR /src/backend/agent-runtime-service
-RUN go mod download
+RUN go mod download || (sleep 2 && go mod download)
 
 # Copy source
 WORKDIR /src
