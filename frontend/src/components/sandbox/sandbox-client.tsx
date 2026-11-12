@@ -25,7 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Money } from "@/components/ui/money";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { api, BackendAgentSpec, BackendCheckpoint, BackendRunDetailResponse } from "@/lib/api";
+import { api, formatFriendlyError, BackendAgentSpec, BackendCheckpoint, BackendRunDetailResponse } from "@/lib/api";
 import { useDelTixStore } from "@/lib/store";
 
 interface ChatMessage {
@@ -44,14 +44,7 @@ function formatCheckpointSummary(output: unknown): string | null {
   if (!output || typeof output !== "object") return null;
   const obj = output as Record<string, any>;
   if (typeof obj.error === "string") {
-    const rawErr = obj.error;
-    // Extract clean PayPal API message if nested inside tool dispatch error
-    const paypalMsgMatch = rawErr.match(/"message"\s*:\s*"([^"]+)"/);
-    const paypalNameMatch = rawErr.match(/"name"\s*:\s*"([^"]+)"/);
-    if (paypalNameMatch || paypalMsgMatch) {
-      return `${paypalNameMatch?.[1] || "PayPal Error"}: ${paypalMsgMatch?.[1] || rawErr}`;
-    }
-    return rawErr;
+    return formatFriendlyError(obj.error);
   }
   if (typeof obj.message === "string") return obj.message;
   if (typeof obj.status === "string") return `Step result: ${obj.status}`;
@@ -83,6 +76,14 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
   const [checkpoints, setCheckpoints] = useState<BackendCheckpoint[]>([]);
   const [pendingApproval, setPendingApproval] = useState<any | null>(null);
   const [stateSnapshot, setStateSnapshot] = useState<Record<string, any>>({});
+  const [creatingOrder, setCreatingOrder] = useState(false);
+  const [sandboxOrderInfo, setSandboxOrderInfo] = useState<{
+    order_id: string;
+    status: string;
+    approve_url?: string;
+    capture_id?: string;
+    error?: string;
+  } | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "msg_init",
@@ -110,6 +111,48 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
       })
       .catch((err) => console.warn("Failed to list specs in sandbox", err));
   }, [initialSpecId]);
+
+  // Auto-capture when returning from PayPal Sandbox checkout (?paypal_approved=1&token=ORDER_ID)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const approved = params.get("paypal_approved") === "1";
+    const approvedOrderId = params.get("token");
+    if (!approved || !approvedOrderId) return;
+
+    setOrderId(approvedOrderId);
+    setCreatingOrder(true);
+    fetch("/api/paypal/sandbox-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "capture", order_id: approvedOrderId }),
+    })
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`);
+        const finalId = data.capture_id || approvedOrderId;
+        setOrderId(finalId);
+        setUserPrompt((prev) =>
+          prev.includes("ORD-7712") ? prev.replace(/ORD-7712/g, finalId) : prev
+        );
+        setSandboxOrderInfo({
+          order_id: approvedOrderId,
+          status: data.status || "COMPLETED",
+          capture_id: data.capture_id,
+        });
+      })
+      .catch((err) => {
+        setSandboxOrderInfo({
+          order_id: approvedOrderId,
+          status: "APPROVED",
+          error: formatFriendlyError(err),
+        });
+      })
+      .finally(() => {
+        setCreatingOrder(false);
+        window.history.replaceState({}, "", window.location.pathname);
+      });
+  }, []);
 
   // Handle spec change
   const handleSpecChange = (specId: string) => {
@@ -156,6 +199,44 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
     setOrderId(preset.orderId);
     setAmountUSD(preset.amount);
     setCustomerEmail(preset.email);
+  };
+
+  // Fetch real order from PayPal Sandbox and generate live checkout approval link
+  const handleFetchPayPalOrder = async () => {
+    setCreatingOrder(true);
+    try {
+      const parsed = parseFloat(amountUSD) || 38.0;
+      const res = await fetch("/api/paypal/sandbox-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          amount_usd: parsed,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
+      }
+      setOrderId(data.order_id);
+      setUserPrompt((prev) =>
+        prev.includes("ORD-")
+          ? prev.replace(/ORD-\d+/g, data.order_id)
+          : `Customer Alex requests refund for Order #${data.order_id} ($${data.amount_usd || parsed.toFixed(2)}). Item damaged in transit.`
+      );
+      setSandboxOrderInfo({
+        order_id: data.order_id,
+        status: data.status || "CREATED",
+        approve_url: data.approve_url,
+      });
+    } catch (err: any) {
+      setSandboxOrderInfo({
+        order_id: "ERROR",
+        status: "FAILED",
+        error: formatFriendlyError(err),
+      });
+    } finally {
+      setCreatingOrder(false);
+    }
   };
 
   const handleStartRun = async () => {
@@ -264,8 +345,8 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
               },
             ]);
           }
-        } catch (e) {
-          console.error("Failed to parse checkpoint event", e);
+        } catch {
+          // Ignore malformed SSE checkpoint frame
         }
       });
 
@@ -315,12 +396,15 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
             setIsRunning(false);
             fetchRuns();
           } else if (currentStatus === "FAILED" || currentStatus === "REJECTED") {
+            const friendly = detail.run.error_message
+              ? formatFriendlyError(detail.run.error_message, "Run could not be completed.")
+              : "Run could not be completed.";
             setMessages((prev) => [
               ...prev,
               {
                 id: `fail_${Date.now()}`,
                 sender: "system",
-                text: `Run terminated with status: ${currentStatus}. ${detail.run.error_message || ""}`,
+                text: currentStatus === "REJECTED" ? "Run rejected by operator." : friendly,
                 timestamp: new Date().toLocaleTimeString(),
               },
             ]);
@@ -328,8 +412,8 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
             setIsRunning(false);
             fetchRuns();
           }
-        } catch (e) {
-          console.error("Failed to parse run_status event", e);
+        } catch {
+          // Ignore malformed SSE status frame
         }
       });
 
@@ -345,7 +429,7 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
         {
           id: `err_${Date.now()}`,
           sender: "system",
-          text: `Failed to trigger sandbox execution: ${err.message}`,
+          text: formatFriendlyError(err),
           timestamp: new Date().toLocaleTimeString(),
         },
       ]);
@@ -420,8 +504,8 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
                 type="button"
                 onClick={() =>
                   handleApplyPreset({
-                    prompt: "Customer Jordan requests refund for Order #ORD-9912 ($150.00). Exceeds threshold.",
-                    orderId: "ORD-9912",
+                    prompt: "Customer Jordan requests refund for Order #ORD-7950 ($150.00). Exceeds threshold.",
+                    orderId: "ORD-7950",
                     amount: "150.00",
                     email: "jordan@example.com",
                   })
@@ -486,9 +570,20 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
           <div className="p-4 border-t border-[#232323] bg-[#080808] space-y-3">
             <div className="grid grid-cols-3 gap-2.5 text-xs">
               <div>
-                <label className="text-[10px] text-[#898989] uppercase font-mono block mb-1">
-                  Order ID
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] text-[#898989] uppercase font-mono">
+                    Order / Capture ID
+                  </label>
+                  <button
+                    type="button"
+                    disabled={creatingOrder}
+                    onClick={handleFetchPayPalOrder}
+                    className="text-[10px] font-mono text-[#E8602E] hover:text-[#ff7b47] flex items-center gap-1 disabled:opacity-50"
+                  >
+                    {creatingOrder ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : null}
+                    <span>Fetch from PayPal</span>
+                  </button>
+                </div>
                 <input
                   type="text"
                   value={orderId}
@@ -519,6 +614,85 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
                 />
               </div>
             </div>
+
+            {sandboxOrderInfo && (
+              <div className="px-2.5 py-1.5 rounded-lg border border-[#232323] bg-[#0C0C0C] text-[11px] font-mono flex flex-wrap items-center justify-between gap-2">
+                {sandboxOrderInfo.error ? (
+                  <span className="text-red-400">PayPal Sandbox: {sandboxOrderInfo.error}</span>
+                ) : (
+                  <>
+                    <span className="text-[#B5B5B5]">
+                      PayPal Order <strong className="text-white">{sandboxOrderInfo.order_id}</strong> ({sandboxOrderInfo.status})
+                      {sandboxOrderInfo.capture_id ? (
+                        <> &bull; Capture <strong className="text-green-400">{sandboxOrderInfo.capture_id}</strong></>
+                      ) : null}
+                    </span>
+                    <span className="flex items-center gap-3">
+                      {sandboxOrderInfo.approve_url && !sandboxOrderInfo.capture_id && (
+                        <a
+                          href={sandboxOrderInfo.approve_url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-amber-400 hover:text-amber-300 font-medium hover:underline inline-flex items-center gap-1"
+                        >
+                          Approve in PayPal &rarr; <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                      {!sandboxOrderInfo.capture_id && (
+                        <button
+                          type="button"
+                          disabled={creatingOrder}
+                          onClick={async () => {
+                            setCreatingOrder(true);
+                            try {
+                              const res = await fetch("/api/paypal/sandbox-order", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  action: "capture",
+                                  order_id: sandboxOrderInfo.order_id,
+                                }),
+                              });
+                              const data = await res.json();
+                              if (!res.ok) {
+                                throw new Error(data?.message || `HTTP ${res.status}`);
+                              }
+                              if (data.capture_id) {
+                                setOrderId(data.capture_id);
+                              }
+                              setSandboxOrderInfo((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      status: data.status || "COMPLETED",
+                                      capture_id: data.capture_id,
+                                      error: undefined,
+                                    }
+                                  : prev
+                              );
+                            } catch (err) {
+                              setSandboxOrderInfo((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      error: formatFriendlyError(err),
+                                    }
+                                  : prev
+                              );
+                            } finally {
+                              setCreatingOrder(false);
+                            }
+                          }}
+                          className="text-green-400 hover:text-green-300 disabled:opacity-50"
+                        >
+                          Capture for Refund
+                        </button>
+                      )}
+                    </span>
+                  </>
+                )}
+              </div>
+            )}
 
             <div className="flex items-center gap-2">
               <input

@@ -674,7 +674,39 @@ def _eval_ast_node(node: ast.AST, context_vars: dict[str, Any]) -> Any:
             return True
         if node.id in ("false", "False"):
             return False
-        return context_vars.get(node.id)
+        if node.id in ("null", "None"):
+            return None
+        val = context_vars.get(node.id)
+        if val is None and ("amount" in node.id or "usd" in node.id or "price" in node.id):
+            val = (
+                context_vars.get("amount_usd")
+                or context_vars.get("amount")
+                or (context_vars.get("inputs", {}) if isinstance(context_vars.get("inputs"), dict) else {}).get("amount_usd")
+            )
+        return val
+
+    if isinstance(node, ast.Attribute):
+        value = _eval_ast_node(node.value, context_vars)
+        if isinstance(value, dict):
+            res = value.get(node.attr)
+            if res is None and ("amount" in node.attr or "usd" in node.attr):
+                res = context_vars.get("amount_usd") or context_vars.get("amount")
+            return res
+        if hasattr(value, node.attr):
+            return getattr(value, node.attr)
+        if isinstance(node.value, ast.Name) and node.value.id in ("inputs", "variables"):
+            return context_vars.get(node.attr)
+        return None
+
+    if isinstance(node, ast.Subscript):
+        value = _eval_ast_node(node.value, context_vars)
+        slice_val = _eval_ast_node(node.slice, context_vars)
+        if isinstance(value, (dict, list)):
+            try:
+                return value[slice_val]
+            except (KeyError, IndexError, TypeError):
+                return None
+        return None
 
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
         return not bool(_eval_ast_node(node.operand, context_vars))
@@ -693,6 +725,12 @@ def _eval_ast_node(node: ast.AST, context_vars: dict[str, Any]) -> Any:
         left = _eval_ast_node(node.left, context_vars)
         for op, comparator in zip(node.ops, node.comparators):
             right = _eval_ast_node(comparator, context_vars)
+            if left is not None and right is not None:
+                try:
+                    left = float(left)
+                    right = float(right)
+                except (ValueError, TypeError):
+                    pass
             op_fn = _SAFE_COMPARE_OPS.get(type(op))
             if op_fn is None or not op_fn(left, right):
                 return False

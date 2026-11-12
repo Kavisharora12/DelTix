@@ -92,11 +92,13 @@ type CapabilityRef struct {
 }
 
 type PolicyConfig struct {
-	ReadOnly             bool     `json:"read_only"`
-	MaxBudgetUSD         float64  `json:"max_budget_usd"`
-	RequireHumanApproval bool     `json:"require_human_approval"`
-	ApprovalTriggers     []string `json:"approval_triggers,omitempty"`
-	ForbiddenActions     []string `json:"forbidden_actions,omitempty"`
+	ReadOnly                  bool     `json:"read_only"`
+	MaxBudgetUSD              float64  `json:"max_budget_usd"`
+	RequireHumanApproval      bool     `json:"require_human_approval"`
+	ApprovalThresholdUSD      float64  `json:"approval_threshold_usd,omitempty"`
+	HumanApprovalThresholdUSD float64  `json:"human_approval_threshold_usd,omitempty"`
+	ApprovalTriggers          []string `json:"approval_triggers,omitempty"`
+	ForbiddenActions          []string `json:"forbidden_actions,omitempty"`
 }
 
 type MemoryConfig struct {

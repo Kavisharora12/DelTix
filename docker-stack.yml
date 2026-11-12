@@ -1,0 +1,147 @@
+version: "3.8"
+
+# =============================================================================
+# DELTIX — Production Docker Swarm Stack (docker-stack.yml)
+# Deploys all 6 backend services over an encrypted overlay network on AWS EC2.
+# Exposed port 8080 is reached via Cloudflare Tunnel / DNS.
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # 1. API Gateway (:8080) — Public Entrypoint & Reverse Proxy Hub
+  # ---------------------------------------------------------------------------
+  api-gateway:
+    image: ${DOCKER_REGISTRY}/deltix-api-gateway:${TAG:-latest}
+    ports:
+      - target: 8080
+        published: 8080
+        protocol: tcp
+        mode: ingress
+    environment:
+      - PORT=8080
+      - FRONTEND_URL=${FRONTEND_URL:-*}
+      - COMPILER_SERVICE_URL=http://agent-compiler-service:8081
+      - RUNTIME_SERVICE_URL=http://agent-runtime-service:8082
+      - CAPABILITY_POLICY_SERVICE_URL=http://capability-policy-service:8084
+      - MEMORY_SERVICE_URL=http://memory-service:8083
+      - SUPABASE_DB_URL=${SUPABASE_DB_URL}
+      - GATEWAY_JWT_SECRET=${GATEWAY_JWT_SECRET}
+      - GATEWAY_ALLOW_DEV_AUTH=${GATEWAY_ALLOW_DEV_AUTH:-false}
+    networks:
+      - deltix-overlay
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+
+  # ---------------------------------------------------------------------------
+  # 2. Agent Compiler Service (:8081) — Natural Language to IR Compiler
+  # ---------------------------------------------------------------------------
+  agent-compiler-service:
+    image: ${DOCKER_REGISTRY}/deltix-agent-compiler-service:${TAG:-latest}
+    environment:
+      - PORT=8081
+      - SUPABASE_DB_URL=${SUPABASE_DB_URL}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_PRIMARY_MODEL=${GEMINI_PRIMARY_MODEL:-gemini-2.5-flash}
+      - GEMINI_FALLBACK_MODEL=${GEMINI_FALLBACK_MODEL:-gemini-2.0-flash}
+      - MEMORY_SERVICE_URL=http://memory-service:8083
+      - CAPABILITY_POLICY_SERVICE_URL=http://capability-policy-service:8084
+    networks:
+      - deltix-overlay
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  # ---------------------------------------------------------------------------
+  # 3. Agent Runtime Service (:8082) — ACID State Machine & Distributed Locks
+  # ---------------------------------------------------------------------------
+  agent-runtime-service:
+    image: ${DOCKER_REGISTRY}/deltix-agent-runtime-service:${TAG:-latest}
+    environment:
+      - PORT=8082
+      - SUPABASE_DB_URL=${SUPABASE_DB_URL}
+      - REDIS_URL=${REDIS_URL}
+      - WORKER_BRIDGE_URL=http://agent-runtime-worker:8085
+      - READINESS_HMAC_SECRET=${READINESS_HMAC_SECRET}
+    networks:
+      - deltix-overlay
+    deploy:
+      replicas: 2
+      update_config:
+        parallelism: 1
+        delay: 10s
+
+  # ---------------------------------------------------------------------------
+  # 4. Agent Runtime Worker (:8085) — LangGraph Financial Worker
+  # ---------------------------------------------------------------------------
+  agent-runtime-worker:
+    image: ${DOCKER_REGISTRY}/deltix-agent-runtime-worker:${TAG:-latest}
+    environment:
+      - PORT=8085
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MEMORY_SERVICE_URL=http://memory-service:8083
+      - CAPABILITY_POLICY_SERVICE_URL=http://capability-policy-service:8084
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
+      - PAYPAL_ENVIRONMENT=${PAYPAL_ENVIRONMENT:-sandbox}
+    networks:
+      - deltix-overlay
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 1024M
+        reservations:
+          memory: 512M
+
+  # ---------------------------------------------------------------------------
+  # 5. Capability & Policy Service (:8084) — Gatekeeper & Idempotency Vault
+  # ---------------------------------------------------------------------------
+  capability-policy-service:
+    image: ${DOCKER_REGISTRY}/deltix-capability-policy-service:${TAG:-latest}
+    environment:
+      - PORT=8084
+      - SUPABASE_DB_URL=${SUPABASE_DB_URL}
+      - RUNTIME_SERVICE_URL=http://agent-runtime-service:8082
+      - APPROVAL_HMAC_SECRET=${APPROVAL_HMAC_SECRET}
+      - PAYPAL_CLIENT_ID=${PAYPAL_CLIENT_ID}
+      - PAYPAL_CLIENT_SECRET=${PAYPAL_CLIENT_SECRET}
+      - PAYPAL_ENVIRONMENT=${PAYPAL_ENVIRONMENT:-sandbox}
+    networks:
+      - deltix-overlay
+    deploy:
+      replicas: 1
+
+  # ---------------------------------------------------------------------------
+  # 6. Memory Service (:8083) — Chroma Semantic Retrieval
+  # ---------------------------------------------------------------------------
+  memory-service:
+    image: ${DOCKER_REGISTRY}/deltix-memory-service:${TAG:-latest}
+    environment:
+      - PORT=8083
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - MEMORY_CHROMA_PERSIST_DIR=/data/chroma
+    volumes:
+      - memory-data:/data/chroma
+    networks:
+      - deltix-overlay
+    deploy:
+      replicas: 1
+
+networks:
+  deltix-overlay:
+    driver: overlay
+    attachable: true
+
+volumes:
+  memory-data:
+    driver: local

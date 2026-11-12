@@ -307,32 +307,89 @@ newgrp docker
 docker swarm init --advertise-addr $(curl -s http://169.254.169.254/latest/meta-data/local-ipv4)
 ```
 
-### 3. Deploy SSL Reverse Proxy (Caddy or Nginx)
-To provide automatic TLS 1.3 certificates and proxy traffic to API Gateway (:8080):
+### 3. Cloudflare Tunnel / DNS Setup (Single Public URL)
+Cloudflare Tunnel (`cloudflared`) connects EC2 to Cloudflare edge **without opening ANY inbound ports** (no port 80/443 needed in AWS Security Groups!).
 
-Create `/opt/caddy/Caddyfile`:
-```caddyfile
-api.yourdomain.com {
-    reverse_proxy localhost:8080 {
-        header_up X-Forwarded-Proto https
-        header_up Host {host}
-    }
-}
-```
-Run Caddy:
+#### Option A: Quick Free Tunnel (Instant 30-Second Setup)
+Install and run `cloudflared` on EC2:
 ```bash
-docker run -d \
-  --name caddy-ssl \
-  --restart always \
-  --net host \
-  -v /opt/caddy/Caddyfile:/etc/caddy/Caddyfile \
-  -v caddy_data:/data \
-  caddy:2.8-alpine
+# Download cloudflared on Ubuntu EC2
+curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+sudo dpkg -i cloudflared.deb
+
+# Run quick tunnel pointing to DelTix API Gateway (:8080)
+cloudflared tunnel --url http://localhost:8080
+```
+This prints an instant HTTPS URL:
+`https://your-unique-subdomain.trycloudflare.com -> http://localhost:8080`
+Use this URL directly as `NEXT_PUBLIC_API_URL` in Vercel!
+
+#### Option B: Named Production Tunnel with Custom Domain (`api.yourdomain.com`)
+1. Log in to Cloudflare on EC2:
+   ```bash
+   cloudflared tunnel login
+   ```
+2. Create the tunnel:
+   ```bash
+   cloudflared tunnel create deltix-api
+   ```
+3. Route your Cloudflare DNS subdomain to the tunnel:
+   ```bash
+   cloudflared tunnel route dns deltix-api api.yourdomain.com
+   ```
+4. Create `/etc/cloudflared/config.yml`:
+   ```yaml
+   tunnel: <TUNNEL-UUID>
+   credentials-file: /root/.cloudflared/<TUNNEL-UUID>.json
+
+   ingress:
+     - hostname: api.yourdomain.com
+       service: http://localhost:8080
+     - service: http_status:404
+   ```
+5. Install and start as a systemd service (auto-restarts on reboot):
+   ```bash
+   sudo cloudflared service install
+   sudo systemctl start cloudflared
+   sudo systemctl enable cloudflared
+   ```
+
+---
+
+## 6. GitHub Actions CI/CD Setup
+
+The workflow in `.github/workflows/deploy.yml` automatically:
+1. Builds all 6 microservices on every push to `main`.
+2. Pushes them to GitHub Container Registry (`ghcr.io/<owner>/<repo>/...`).
+3. Connects via SSH to your EC2 instance and triggers a zero-downtime rolling update in Docker Swarm.
+
+### Required GitHub Repository Secrets
+Go to your GitHub repo **Settings > Secrets and variables > Actions > New repository secret**:
+
+| Secret Name | Example Value | Description |
+|---|---|---|
+| `EC2_HOST` | `3.112.45.10` | Public IPv4 address of your EC2 instance |
+| `EC2_USER` | `ubuntu` | Default SSH user for Ubuntu AMI |
+| `EC2_SSH_KEY` | `-----BEGIN RSA PRIVATE KEY-----...` | Private SSH Key (`.pem` file content) used to access EC2 |
+
+### Required Environment File on EC2
+On your EC2 instance at `/opt/deltix/.env`:
+```bash
+SUPABASE_DB_URL=postgresql://postgres.<project_ref>:<password>@aws-0-<region>.pooler.supabase.com:6543/postgres?sslmode=require
+REDIS_URL=redis://localhost:6379
+GEMINI_API_KEY=AIzaSy...
+GATEWAY_JWT_SECRET=super_secret_jwt_key
+READINESS_HMAC_SECRET=super_secret_readiness_key
+APPROVAL_HMAC_SECRET=super_secret_approval_key
+PAYPAL_CLIENT_ID=AUXK0ow...
+PAYPAL_CLIENT_SECRET=EMTeQa...
+PAYPAL_ENVIRONMENT=SANDBOX
+FRONTEND_URL=https://your-frontend.vercel.app
 ```
 
 ---
 
-## 6. Frontend Deployment on Vercel
+## 7. Frontend Deployment on Vercel
 
 ### 1. Import Repository
 1. Navigate to [vercel.com](https://vercel.com) and click **Add New > Project**.

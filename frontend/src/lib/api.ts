@@ -449,6 +449,61 @@ export function mapBackendRunToRunItem(
 }
 
 /**
+ * Convert raw backend, Gemini, or PayPal errors into clean user-facing messages
+ * without exposing raw JSON logs, stack traces, or upstream 401/5xx details.
+ */
+export function formatFriendlyError(
+  raw: unknown,
+  fallback = "Server is busy. Please try again in a moment."
+): string {
+  const msg = raw instanceof Error ? raw.message : typeof raw === "string" ? raw : "";
+  const trimmed = msg.trim();
+  if (!trimmed) return fallback;
+
+  const lower = trimmed.toLowerCase();
+
+  // Upstream AI (Gemini), PayPal 401/auth, or transient 5xx/network busy conditions
+  if (
+    lower.includes("401") ||
+    lower.includes("authentication_failure") ||
+    lower.includes("invalid_client") ||
+    lower.includes("gemini") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("429") ||
+    lower.includes("502") ||
+    lower.includes("503") ||
+    lower.includes("504") ||
+    lower.includes("500") ||
+    lower.includes("gateway_unreachable") ||
+    lower.includes("econnrefused") ||
+    lower.includes("overloaded") ||
+    lower.includes("unavailable") ||
+    lower.includes("timeout") ||
+    lower.includes("failed to fetch")
+  ) {
+    return "Server is busy. Please try again in a moment.";
+  }
+
+  if (lower.includes("resource_not_found") || lower.includes("invalid_resource_id")) {
+    return "Order or Capture ID was not found in PayPal Sandbox. Click '+ Real PayPal ID' to generate a valid one.";
+  }
+
+  // Strip raw JSON payloads or HTTP wrapper prefixes if present
+  const withoutJson = trimmed
+    .replace(/\{[\s\S]*\}/g, "")
+    .replace(/capability dispatch HTTP \d+:\s*/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!withoutJson || withoutJson.length < 4) {
+    return fallback;
+  }
+  return withoutJson;
+}
+
+/**
  * Standard HTTP request wrapper with CORS credentials, problem JSON parsing, and dev auth fallback.
  */
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
@@ -467,7 +522,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     } catch {
       // Non-JSON error
     }
-    throw new Error(errorDetail);
+    throw new Error(formatFriendlyError(`${res.status} ${errorDetail}`));
   }
 
   return res.json() as Promise<T>;

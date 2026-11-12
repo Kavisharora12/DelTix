@@ -292,7 +292,12 @@ class TestDynamicLangGraphWorker(unittest.TestCase):
         )
 
     def test_safe_ast_condition_evaluator(self) -> None:
-        ctx = {"amount_usd": 45.0, "status": "DAMAGED", "verified": True}
+        ctx = {
+            "amount_usd": 45.0,
+            "status": "DAMAGED",
+            "verified": True,
+            "inputs": {"amount_usd": 78.0, "reason": "damaged"},
+        }
         self.assertTrue(
             evaluate_condition_expression(
                 "amount_usd <= 50 and status == 'DAMAGED' and verified == true", ctx
@@ -300,6 +305,20 @@ class TestDynamicLangGraphWorker(unittest.TestCase):
         )
         self.assertFalse(
             evaluate_condition_expression("amount_usd > 100", ctx)
+        )
+        # Test attribute access (e.g. inputs.amount_usd)
+        self.assertTrue(
+            evaluate_condition_expression("inputs.amount_usd > 50", ctx)
+        )
+        self.assertFalse(
+            evaluate_condition_expression("inputs.amount_usd <= 50", ctx)
+        )
+        # Test string comparison and fallback
+        self.assertTrue(
+            evaluate_condition_expression("refund_amount_net <= 50.00", {"amount_usd": 38.0})
+        )
+        self.assertTrue(
+            evaluate_condition_expression("refund_amount_net > 50.00", {"amount_usd": 78.0})
         )
 
     def test_deterministic_math_and_grounding_verifier_pipeline(self) -> None:

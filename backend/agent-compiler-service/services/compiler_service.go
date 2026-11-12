@@ -354,8 +354,8 @@ Rules:
    - "capabilities": declare every capability used by the nodes.
    - "policies": enforce exact safety constraints matching the Prompt and Clarifications (if all nodes use read-only tools and read_only is true, set max_budget_usd to 0; if max_budget_usd > 0, set read_only to false and set max_budget_usd to the exact USD spend limit requested).
    - "execution_limits": realistic bounds (e.g. max_steps between 5 and 50, timeout_seconds between 10 and 300).
-   - "nodes": construct an executable graph with an entry node, intermediate processing/tool steps, and a terminal sink node (0 outgoing transitions). Never put JavaScript or multi-line code in payload.expression (use payload.prompt_template for LLM_REASONING, payload.capability_id for TOOL_EXECUTION, or leave expression empty for pass-through DETERMINISTIC_PROCESS nodes).
-   - "transitions": connect nodes deterministically with simple variable comparison condition_expression (e.g. "amount_usd < 50") or default routes.`,
+   - "nodes": construct an executable graph with an entry node, intermediate processing/tool steps, and a terminal sink node (0 outgoing transitions). When human approval or spend thresholds are requested (e.g. "if > 50 require approval"), you MUST synthesize a CONDITIONAL_ROUTER node that routes amounts over the threshold to a HUMAN_APPROVAL node before the mutating TOOL_EXECUTION node, and amounts under the threshold directly to the TOOL_EXECUTION node. Never put JavaScript or multi-line code in payload.expression (use payload.prompt_template for LLM_REASONING, payload.capability_id for TOOL_EXECUTION, or leave expression empty for pass-through DETERMINISTIC_PROCESS nodes).
+   - "transitions": connect nodes deterministically with simple variable comparison condition_expression (e.g. "amount_usd <= 50" -> tool node, "amount_usd > 50" -> HUMAN_APPROVAL node, and HUMAN_APPROVAL node -> tool node upon approval) or default routes.`,
 		agentID, tenantID, req.Name, req.Category, userID, string(capsJSON),
 	)
 
