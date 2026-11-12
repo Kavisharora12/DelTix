@@ -44,14 +44,44 @@ const TEMPLATES: Record<string, ExampleTemplate & { applyQuickSettings?: boolean
     tools: [],
     applyQuickSettings: false,
   },
-  dummy_template: {
-    name: "Dummy Template — PayPal Refund Agent",
+  refund_agent: {
+    name: "Customer Refund Specialist",
     category: "customer-service-refunds",
     prompt:
       "When a customer requests a refund with order_id and reason, verify PayPal transaction status using paypal.transaction.search. If transaction is COMPLETED and amount is <= $50.00 USD, refund automatically via paypal.payment.refund. If amount is > $50.00 USD, pause and require human finance manager approval. Deduct 5% restocking fee using exact Decimal arithmetic. Do not exceed max spend of $500.00 USD per run.",
     spendCap: 500,
     approvalThreshold: 50,
     tools: ["paypal.transaction.search", "paypal.payment.refund"],
+    applyQuickSettings: true,
+  },
+  invoice_agent: {
+    name: "B2B Billing & Invoice Agent",
+    category: "accounts-receivable-invoicing",
+    prompt:
+      "When a finance operator provides recipient_email, amount, and currency, generate a PayPal sandbox invoice using paypal.invoice.create. Auto-create invoices <= $100.00 USD. If amount is > $100.00 USD, pause and require human finance manager approval before issuing. Enforce a strict max spend cap of $1,000.00 USD per run.",
+    spendCap: 1000,
+    approvalThreshold: 100,
+    tools: ["paypal.invoice.create"],
+    applyQuickSettings: true,
+  },
+  treasury_auditor: {
+    name: "Read-Only Treasury Auditor",
+    category: "treasury-reconciliation",
+    prompt:
+      "Search PayPal sandbox transaction history using paypal.transaction.search for the requested start_date and end_date. Reconcile captured totals using exact Decimal arithmetic and output a structured audit summary. Enforce read_only=true with zero money movement and a strict max spend cap of $0.00 USD per run.",
+    spendCap: 0,
+    approvalThreshold: 0,
+    tools: ["paypal.transaction.search"],
+    applyQuickSettings: true,
+  },
+  dispute_triage: {
+    name: "Dispute & Replacement Triage Agent",
+    category: "risk-and-dispute-ops",
+    prompt:
+      "Inspect customer claim history using paypal.transaction.search. For verified refund claims <= $75.00 USD, issue a refund via paypal.payment.refund; for replacement billing adjustments, issue an invoice via paypal.invoice.create. If any action exceeds $75.00 USD, pause and require human compliance approval. Enforce a strict max spend cap of $750.00 USD per run.",
+    spendCap: 750,
+    approvalThreshold: 75,
+    tools: ["paypal.transaction.search", "paypal.payment.refund", "paypal.invoice.create"],
     applyQuickSettings: true,
   },
 };
@@ -184,7 +214,10 @@ export default function StudioNewPage() {
               className="bg-slate-3 border border-slate-5 rounded-btn px-2.5 py-1 text-xs text-slate-12 focus:outline-none focus:border-slate-8"
             >
               <option value="blank">Write Your Own (Blank)</option>
-              <option value="dummy_template">Dummy Template</option>
+              <option value="refund_agent">Customer Refund Specialist</option>
+              <option value="invoice_agent">B2B Billing &amp; Invoice Agent</option>
+              <option value="treasury_auditor">Read-Only Treasury Auditor</option>
+              <option value="dispute_triage">Dispute &amp; Replacement Triage Agent</option>
             </select>
           </div>
         </div>
