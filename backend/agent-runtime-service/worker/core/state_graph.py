@@ -97,6 +97,47 @@ class AgentRunState(TypedDict):
     checkpoints: list[dict[str, Any]]
 
 
+def _extract_approval_threshold(
+    policies: dict[str, Any] | None,
+    transitions: list[dict[str, Any]] | None = None,
+    default_fallback: float = 50.0,
+) -> float:
+    """Extracts approval threshold dynamically from policies or transition expressions (e.g. $50, $75, $100)."""
+    pols = policies or {}
+    raw = pols.get("approval_threshold_usd")
+    if raw is None:
+        raw = pols.get("human_approval_threshold_usd")
+    if raw is not None:
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            pass
+
+    # Dynamically extract threshold from transition expressions if compiled into the graph (e.g. "amount_usd <= 75")
+    if transitions:
+        import re
+        for edge in transitions:
+            cond = str(edge.get("condition_expression") or "")
+            m = re.search(r'(?:<=|<|>=|>)\s*([0-9]+(?:\.[0-9]+)?)', cond)
+            if m:
+                try:
+                    return float(m.group(1))
+                except (ValueError, TypeError):
+                    pass
+
+    # If max_budget is defined and positive, use it as ceiling
+    budget = pols.get("max_budget_usd")
+    if budget is not None:
+        try:
+            b = float(budget)
+            if b > 0:
+                return b
+        except (ValueError, TypeError):
+            pass
+
+    return default_fallback
+
+
 class DynamicLangGraphEngine:
     """Compiles a canonical AgentIR JSON specification into an executable LangGraph StateGraph."""
 
@@ -186,6 +227,7 @@ class DynamicLangGraphEngine:
                     policies=policies,
                     memory_cfg=memory_cfg,
                     capabilities_map=capabilities_map,
+                    transitions=transitions,
                 ),
             )
 
@@ -211,6 +253,7 @@ class DynamicLangGraphEngine:
                     max_steps=max_steps,
                     max_errors=max_errors,
                     policies=policies,
+                    transitions=transitions,
                 ),
             )
 
@@ -222,6 +265,7 @@ class DynamicLangGraphEngine:
         policies: dict[str, Any],
         memory_cfg: dict[str, Any],
         capabilities_map: dict[str, dict[str, Any]],
+        transitions: list[dict[str, Any]] | None = None,
     ) -> Any:
         node_id: str = node_def["id"]
         node_type: str = node_def["type"]
@@ -505,11 +549,7 @@ class DynamicLangGraphEngine:
 
                     # Deterministic Runtime Guardrail 3: Sensitive Tool Requires Approval Token
                     if is_sensitive and not state["approval_token"]:
-                        threshold = float(
-                            policies.get("approval_threshold_usd")
-                            or policies.get("human_approval_threshold_usd")
-                            or 50.0
-                        )
+                        threshold = _extract_approval_threshold(policies, transitions)
                         require_human = bool(
                             policies.get("require_human_approval", False)
                         )
@@ -695,13 +735,10 @@ class DynamicLangGraphEngine:
         max_steps: int,
         max_errors: int,
         policies: dict[str, Any] | None = None,
+        transitions: list[dict[str, Any]] | None = None,
     ) -> Callable[[AgentRunState], str]:
         pols = policies or {}
-        threshold = float(
-            pols.get("approval_threshold_usd")
-            or pols.get("human_approval_threshold_usd")
-            or 50.0
-        )
+        threshold = _extract_approval_threshold(pols, outgoing_edges or transitions)
         require_human = bool(pols.get("require_human_approval", False))
 
         def _route(state: AgentRunState) -> str:

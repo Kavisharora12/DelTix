@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -309,7 +310,8 @@ Your job is to compile a user's natural language request into a strictly valid J
     "policies": {
       "read_only": boolean,
       "max_budget_usd": number,
-      "require_human_approval": boolean
+      "require_human_approval": boolean,
+      "approval_threshold_usd": number
     },
     "memory": {
       "enable_semantic_memory": boolean,
@@ -352,10 +354,10 @@ Rules:
    - "metadata": populate name, category, author, and description accurately based on the user's intent.
    - "inputs": derive required input parameters from the user's workflow.
    - "capabilities": declare every capability used by the nodes.
-   - "policies": enforce exact safety constraints matching the Prompt and Clarifications (if all nodes use read-only tools and read_only is true, set max_budget_usd to 0; if max_budget_usd > 0, set read_only to false and set max_budget_usd to the exact USD spend limit requested).
+   - "policies": enforce exact safety constraints matching the Prompt and Clarifications. Populate "approval_threshold_usd" with the exact numeric USD threshold specified in the Prompt or Clarifications (e.g. 50, 75, 100, 250); if no threshold is specified, set to max_budget_usd. If all nodes use read-only tools and read_only is true, set max_budget_usd to 0; if max_budget_usd > 0, set read_only to false.
    - "execution_limits": realistic bounds (e.g. max_steps between 5 and 50, timeout_seconds between 10 and 300).
-   - "nodes": construct an executable graph with an entry node, intermediate processing/tool steps, and a terminal sink node (0 outgoing transitions). When human approval or spend thresholds are requested (e.g. "if > 50 require approval"), you MUST synthesize a CONDITIONAL_ROUTER node that routes amounts over the threshold to a HUMAN_APPROVAL node before the mutating TOOL_EXECUTION node, and amounts under the threshold directly to the TOOL_EXECUTION node. Never put JavaScript or multi-line code in payload.expression (use payload.prompt_template for LLM_REASONING, payload.capability_id for TOOL_EXECUTION, or leave expression empty for pass-through DETERMINISTIC_PROCESS nodes).
-   - "transitions": connect nodes deterministically with simple variable comparison condition_expression (e.g. "amount_usd <= 50" -> tool node, "amount_usd > 50" -> HUMAN_APPROVAL node, and HUMAN_APPROVAL node -> tool node upon approval) or default routes.`,
+   - "nodes": construct an executable graph with an entry node, intermediate processing/tool steps, and a terminal sink node (0 outgoing transitions). When human approval or spend thresholds are requested (e.g. "if > <threshold> require approval"), you MUST synthesize a CONDITIONAL_ROUTER node that routes amounts over the threshold to a HUMAN_APPROVAL node before the mutating TOOL_EXECUTION node, and amounts under or equal to the threshold directly to the TOOL_EXECUTION node. Never put JavaScript or multi-line code in payload.expression (use payload.prompt_template for LLM_REASONING, payload.capability_id for TOOL_EXECUTION, or leave expression empty for pass-through DETERMINISTIC_PROCESS nodes).
+   - "transitions": connect nodes deterministically with simple variable comparison condition_expression using the exact threshold specified in the prompt (e.g. "amount_usd <= <threshold>" -> tool node, "amount_usd > <threshold>" -> HUMAN_APPROVAL node, and HUMAN_APPROVAL node -> tool node upon approval) or default routes.`,
 		agentID, tenantID, req.Name, req.Category, userID, string(capsJSON),
 	)
 
@@ -793,6 +795,24 @@ func hydrateCompiledIR(
 		ir.ExecutionLimits.MaxConsecutiveErrors = 3
 	}
 
+	// Dynamic Clarifications & Threshold Hydration: Never lock to hardcoded values
+	if req.Clarifications != nil {
+		if rawThresh, ok := req.Clarifications["approval_threshold_usd"]; ok {
+			clean := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(rawThresh), "$", ""), "USD", "")
+			clean = strings.TrimSpace(clean)
+			if parsed, err := strconv.ParseFloat(clean, 64); err == nil && parsed > 0 {
+				ir.Policies.ApprovalThresholdUSD = parsed
+			}
+		}
+		if rawBudget, ok := req.Clarifications["max_budget_usd"]; ok {
+			clean := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(rawBudget), "$", ""), "USD", "")
+			clean = strings.TrimSpace(clean)
+			if parsed, err := strconv.ParseFloat(clean, 64); err == nil && parsed > 0 {
+				ir.Policies.MaxBudgetUSD = parsed
+			}
+		}
+	}
+
 	// Read-only agents with zero mutating tools must keep max_budget_usd = 0 so policy schema remains consistent.
 	capByID := make(map[string]CapabilityMetadata, len(activeCaps))
 	for _, c := range activeCaps {
@@ -810,6 +830,27 @@ func hydrateCompiledIR(
 	}
 	if ir.Policies.ReadOnly && !hasMutationTool {
 		ir.Policies.MaxBudgetUSD = 0
+	}
+
+	// If approval threshold is still 0, dynamically inspect compiled transitions for condition thresholds (e.g. "<= 75", "<= 100")
+	if ir.Policies.ApprovalThresholdUSD <= 0 {
+		for _, edge := range ir.Transitions {
+			cond := strings.TrimSpace(edge.ConditionExpression)
+			if strings.Contains(cond, "<=") || strings.Contains(cond, ">") {
+				fields := strings.FieldsFunc(cond, func(r rune) bool {
+					return r == '<' || r == '>' || r == '=' || r == ' ' || r == '$'
+				})
+				for _, f := range fields {
+					if p, err := strconv.ParseFloat(f, 64); err == nil && p > 0 {
+						ir.Policies.ApprovalThresholdUSD = p
+						break
+					}
+				}
+				if ir.Policies.ApprovalThresholdUSD > 0 {
+					break
+				}
+			}
+		}
 	}
 }
 

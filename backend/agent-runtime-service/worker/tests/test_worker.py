@@ -320,6 +320,19 @@ class TestDynamicLangGraphWorker(unittest.TestCase):
         self.assertTrue(
             evaluate_condition_expression("refund_amount_net > 50.00", {"amount_usd": 78.0})
         )
+        # Test arbitrary dynamic thresholds (e.g. $75, $100, $250)
+        self.assertTrue(
+            evaluate_condition_expression("amount_usd <= 75.00", {"amount_usd": 72.50})
+        )
+        self.assertTrue(
+            evaluate_condition_expression("amount_usd > 75.00", {"amount_usd": 80.00})
+        )
+        self.assertTrue(
+            evaluate_condition_expression("inputs.amount_usd <= 100", {"inputs": {"amount_usd": 99.00}})
+        )
+        self.assertTrue(
+            evaluate_condition_expression("inputs.amount_usd > 100", {"inputs": {"amount_usd": 150.00}})
+        )
 
     def test_deterministic_math_and_grounding_verifier_pipeline(self) -> None:
         class _GroundedExtractorLLM:
