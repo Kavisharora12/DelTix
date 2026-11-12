@@ -1,76 +1,52 @@
-# DelTix Integration, Docker & Route Audit Bug Report
+# DelTix Integration, Auth, Docker & Route Audit Bug Report (`bug.md`)
 
 Synced with [test.md](./test.md) and [frontend/left.md](./frontend/left.md).
 
 ---
 
-## 1. Git Rebase & Infrastructure Regressions (Fixed & Verified)
+## 1. Fixed & Verified Bugs
 
-1. **`backend/agent-runtime-service/handlers/runtime_handler.go` (Compile Failure — FIXED)**
-   - **Cause:** Rebase dropped `sharedmodels "github.com/deltix/shared/models"`, used stale `cp.ID` instead of `cp.CheckpointID`, and referenced undefined `runtimemodels.RunStatus*`.
-   - **Fix:** Restored import, `cp.CheckpointID`, and `status.IsTerminal() || status == sharedmodels.RunStatusPausedForApproval`.
-   - **Verification:** `go test -C DelTix/backend/agent-runtime-service ./...` passed.
+1. **Google OAuth Flow & Tenant Auth Integration (`frontend/src/app/login/page.tsx`, `src/app/page.tsx`, `src/components/shell/topbar.tsx`, `src/components/shell/app-shell.tsx`, `src/lib/api.ts`, `src/lib/store.ts`, `src/app/api/gateway/[...path]/route.ts`, `backend/api-gateway/handlers/gateway_handler.go` — FIXED)**
+   - **Previous Bug:** No `/login` route existed; landing `Sign In with Google` linked straight to `/dashboard`; `TopBar` linked to `/v1/auth/google/login` without `?tenant_id=...` (`400 MISSING_TENANT_ID`) and read `sess?.user` instead of `sess?.session`; `api.ts` and Next.js proxy `route.ts` unconditionally injected `Bearer dev_token_deltix` + `org_prod_442` overriding real `deltix_session` cookies; `HandleGoogleCallback` returned raw JSON instead of redirecting back to frontend.
+   - **Fix:** Added dedicated `/login` page (with Workspace Tenant selector, Google OAuth CTA, error banner, and explicit opt-in Dev Sandbox button when `NEXT_PUBLIC_ALLOW_DEV_AUTH=true`), configured `FRONTEND_URL=http://localhost:3000`, added browser `302` callback redirect to `${FRONTEND_URL}/dashboard?auth=google` (preserving JSON for `Accept: application/json`), removed forced `dev_token_deltix` proxy injection, wired unauthenticated console redirect to `/login`, and added `Sign Out` (`POST /v1/auth/logout`).
+   - **Verification:** `go test -C backend/api-gateway ./...` (`TestGatewayGoogleCallbackBrowserRedirect`) passed; live Google OAuth sign-in verified reaching `http://localhost:3000/dashboard?auth=google` with authenticated user & `TENANT: org_prod_442`.
 
-2. **`backend/agent-runtime-service/worker/api/grpc_server.py` (Runtime ImportError — FIXED)**
-   - **Cause:** Rebase dropped `import asyncio`, `from concurrent import futures`, `import json`, `import os` while retaining unused `PayPalAgentToolkitDispatcher`.
-   - **Fix:** Restored stdlib imports, removed unused import, kept `tool_dispatcher = http_dispatcher` (`:8084` policy/audit invariant).
-   - **Verification:** `python -m unittest DelTix/backend/agent-runtime-service/worker/tests/test_worker.py` (`Ran 9 tests`, `OK`).
+2. **Next.js 16 Proxy Param Type & Compiler `getSpec` Unwrap (`frontend/src/app/api/gateway/[...path]/route.ts`, `frontend/src/lib/api.ts`, `frontend/package.json` — FIXED)**
+   - **Previous Bug:** Next.js 16 requires `context.params` to be `Promise<{ path: string[] }>` (blocking `next build` TypeScript validation); `api.getSpec()` did not unwrap `{ spec, trace_id }`; Next.js 16 Turbopack panicked spawning Windows PostCSS workers on `@xyflow/react/dist/style.css`.
+   - **Fix:** Updated all HTTP methods in `route.ts` to `await context.params`, unwrapped `data.spec` in `api.getSpec()`, and updated `frontend/package.json` `build` script to `next build --webpack`.
+   - **Verification:** `npm --prefix frontend run typecheck` exited `0`; `next build --webpack` completed TypeScript & compilation cleanly (`Compiled successfully`, `Finished TypeScript`; local Windows sandbox hit transient `mkdir EPERM` during static prerender).
 
-3. **`backend/agent-runtime-service/worker/services/executor_service.py` (Memory URL Mismatch — FIXED)**
-   - **Cause:** Rebase reverted `HTTPMemoryClient` to stale endpoints.
-   - **Fix:** Restored `/internal/v1/memory/retrieve` and `/internal/v1/memory/store` with `X-Tenant-ID`.
-   - **Verification:** `test_worker.py` (`Ran 9 tests`, `OK`).
+3. **Memory Service Port Env Var Name (`backend/memory-service/config/config.py` — FIXED)**
+   - **Previous Bug:** `.env.example` / `.env` defined `MEMORY_HTTP_PORT=8083` while `memory-service/config/config.py` only read `MEMORY_SERVICE_PORT`.
+   - **Fix:** Updated `load_memory_config_from_env()` to read `MEMORY_HTTP_PORT` first with fallback to `MEMORY_SERVICE_PORT` (`8083`).
+   - **Verification:** Python `load_memory_config_from_env()` + `validate_storage()` passed against root `.env`.
 
-4. **`backend/capability-policy-service/adapters/paypal_adapter.go` (PayPal Payload Shape — FIXED)**
-   - **Cause:** Flat inputs (`amount_usd`, `customer_email`, `item_name`) and raw toolkit `items` were forwarded unmodified to PayPal REST v2 endpoints.
-   - **Fix:** Added PayPal v2 schema formatters for `/v2/checkout/orders` and `/v2/invoicing/invoices`.
-   - **Verification:** `go test -C DelTix/backend/capability-policy-service ./...` passed.
+4. **Missing Frontend Dashboard, NL Studio & Chat Sandbox Routes + Core Contract Fixes (FIXED)**
+   - Built `/dashboard` (`src/app/dashboard/page.tsx`), `/studio/new` (`src/app/studio/new/page.tsx` with Clarification Drawer & Synthetic Scorecard), and `/sandbox` / `/sandbox/[specId]` (`src/components/sandbox/sandbox-client.tsx` with live SSE stream).
+   - Fixed `compilePrompt` (`natural_language_prompt`), `startRun` (`resp.run.run_id`), `decideApproval` (`approvalId` + `{ decision, reason }`), `getSpec` (`data.spec`), and removed duplicate inner `<AppShell>` wrappers from `/dashboard`, `/studio/new`, `/sandbox`, `/sandbox/[specId]`.
 
-5. **Whole-Project Dockerization & Bridge Isolation (`docker-compose.yml`, `frontend/Dockerfile`, `.dockerignore` — FIXED IN FILES, COMPOSE BUILD PENDING)**
-   - **Fixed:** Added multi-stage `frontend/Dockerfile`, `frontend/.dockerignore`, root `.dockerignore`, `frontend/.env(.example)`, and runtime proxy `/api/gateway/[...path]` (`src/app/api/gateway/[...path]/route.ts`) so Next.js calls `http://api-gateway:8080` over `deltix-network` without exposing backend secrets or internal service ports (`8081`–`8085` changed from host `ports:` to `expose:` only; `agent-compiler-service` also given bridge `MEMORY_SERVICE_URL` and `CAPABILITY_POLICY_SERVICE_URL`).
-   - **Remaining Check:** `docker compose config` / `docker compose up -d --build` has not yet been executed after these edits.
-
----
-
-## 2. Active Backend, Auth & Configuration Bugs (Open)
-
-1. **Google OAuth "Sign In" Link Fails (`400 MISSING_TENANT_ID`) (`frontend/src/components/shell/topbar.tsx:153` vs `backend/api-gateway/handlers/gateway_handler.go:114-129`)**
-   - **Bug:** `TopBar` links directly to `${API_BASE}/v1/auth/google/login` with no query params. `HandleGoogleLogin` rejects requests without `?tenant_id=...` (`400 MISSING_TENANT_ID`) and returns JSON `{ auth_url }` instead of redirecting unless `&redirect=true` is also present.
-   - **Impact:** Clicking **Sign In** in the UI fails with JSON `400` in the browser.
-
-2. **SSE Stream Dev Auth Failure (`401 UNAUTHORIZED`) (`frontend/src/lib/api.ts:414-418`, `backend/api-gateway/middleware/auth_middleware.go:91-106`)**
-   - **Bug:** `api.createRunStream` uses `new EventSource(url, { withCredentials: true })`, which cannot attach `Authorization: Bearer dev_token_deltix`. Gateway `ExtractSessionID` only checks `Authorization: Bearer ...` and the `deltix_session` cookie (not query param or dev cookie).
-   - **Impact:** Live SSE updates (`/v1/runs/{run_id}/stream`) return `401` in browser dev mode (`GATEWAY_ALLOW_DEV_AUTH=true`) unless authenticated via Google OAuth session cookie or `fetch`-based SSE streaming.
-
-3. **Memory Service Port Env Var Name Mismatch (`.env.example:60` vs `backend/memory-service/config/config.py:167`)**
-   - **Bug:** `.env.example` documents `MEMORY_HTTP_PORT=8083`, whereas `memory-service/config/config.py` reads `MEMORY_SERVICE_PORT`. Works at default `8083`, fails if port is customized via `MEMORY_HTTP_PORT`.
-
-4. **Host `pytest` Missing for `memory-service` Tests (`backend/memory-service/tests/test_memory.py`)**
-   - **Bug / Gap:** `python -m pytest` fails on host (`No module named pytest`); `test_memory.py` uses pytest-style test functions and relative `api` imports so `python -m unittest` fails on host too. Requires `pip install -r requirements.txt` or running inside the Docker image.
+5. **Backend Rebase & PayPal Adapter Regressions (FIXED)**
+   - `runtime_handler.go`: restored `sharedmodels` import and `cp.CheckpointID` / `sharedmodels.RunStatusPausedForApproval`.
+   - `worker/api/grpc_server.py` & `executor_service.py`: restored stdlib imports and `/internal/v1/memory/{retrieve,store}` URLs.
+   - `capability-policy-service/adapters/paypal_adapter.go`: mapped PayPal v2 `/v2/checkout/orders` and `/v2/invoicing/invoices` payloads cleanly.
+   - **Verification:** All 5 Go test suites (`-count=1`), all 4 Go binary builds, and `worker` (`9 tests OK`) passed.
 
 ---
 
-## 3. Frontend <-> Backend Contract Bugs (Open — See [frontend/left.md](./frontend/left.md))
+## 2. Active & Remaining Bugs / Limitations (Open)
 
-5. **Compile Endpoint Schema Mismatch (`frontend/src/lib/api.ts:352-357`, `frontend/src/components/studio/agent-studio.tsx:52-59`)**
-   - Sends `{ prompt, category }` instead of `{ natural_language_prompt, category }` (`400 EMPTY_PROMPT`).
-   - Reads `resp.ir` instead of `resp.agent_ir`.
-   - `agent-studio.tsx` sends raw YAML instead of a natural-language prompt, ignores `CLARIFICATION_REQUIRED` + `clarification_questions`, ignores `synthetic_tests`, keeps hardcoded preview nodes, and does not sync `yamlContent` on agent change.
+1. **SSE Stream Auth in Explicit Dev Sandbox Mode (`401 UNAUTHORIZED`) (`frontend/src/lib/api.ts:640`, `backend/api-gateway/middleware/auth_middleware.go:91-106`)**
+   - **Bug:** `api.createRunStream` uses browser `EventSource(url, { withCredentials: true })`, which sends the `HttpOnly` `deltix_session` cookie (so **Google OAuth works end-to-end**), but cannot send `Authorization: Bearer dev_token_deltix` if a user signs in via the explicit Dev Sandbox bypass button.
+   - **Impact:** Live SSE (`/v1/runs/{run_id}/stream`) requires Google OAuth cookie auth (or replacing `EventSource` with `fetch` streaming when using Bearer tokens).
 
-6. **Start Run Unwrap & Local Fallback Masking (`frontend/src/lib/api.ts:377-382`, `frontend/src/lib/store.ts:206-273`)**
-   - `POST /v1/runs` returns `RunDetailResponse` (`{ run: { run_id, ... }, checkpoints, pending_approval }`), while `api.startRun` / `store.ts` reads `resp.run_id` (`undefined`), triggers `GET /v1/runs/undefined` (`404`), catches it, and silently creates a local mock run with hardcoded `Apex Logistics Corp` / `$1250` inputs.
+2. **`approveRun` / `rejectRun` Local Optimistic Fallback Masking (`frontend/src/lib/store.ts:308-360`)**
+   - **Bug:** Unlike `createRunFromAgent` (which now throws backend errors cleanly), `approveRun` and `rejectRun` still catch backend failures with `console.warn` and locally flip status to `COMPLETED` / fabricate a random `atok_live_*` string instead of surfacing HTTP errors (`403`, `404`, `500`) to the UI.
 
-7. **Approval Decision ID & Body Mismatch (`frontend/src/lib/api.ts:276-288, 387-402`, `frontend/src/lib/store.ts:303-360`)**
-   - `mapBackendRunToRunItem` drops `pending_approval.approval_id`, causing `approveRun` / `rejectRun` to send `runId` instead of `apr_...` (`404`).
-   - `api.decideApproval` sends `{ approval_id, approval_status, decision_reason, approved_by }` instead of `{ decision: "APPROVED" | "REJECTED", reason }`.
-   - `store.ts` fabricates a fake `atok_live_...` locally instead of using the backend response and refreshing the resumed run.
+3. **Mock / Client-Derived Console Pages & Unwired Controls (`frontend/src/app/audit/page.tsx`, `ledger/page.tsx`, `policies/page.tsx`, `store.ts:271-294`)**
+   - `/policies` **Capabilities** tab fetches live `GET /v1/capabilities`, whereas **Policy Rules** (`INITIAL_POLICIES` & `+ New Policy Rule`) is local React state only (no backend policy CRUD endpoint).
+   - `/ledger` and `/audit` derive settlement rows and `sha256_*` audit hashes client-side from `runs` (no dedicated backend `/v1/ledger` or `/v1/audit` HTTP endpoints exist yet).
+   - `retryRunFromCheckpoint` (`store.ts:271-294`) only refreshes `GET /v1/runs/{run_id}` rather than calling a backend replay endpoint; **Cancel run** has no backend endpoint wired.
 
-8. **AgentSpec & Checkpoint Schema Mismatches (`frontend/src/lib/api.ts:25-80`)**
-   - `BackendAgentSpec` expects `ir_payload` (`agent_name`, `capability`) while backend returns `agent_ir` (`nodes[].payload.capability_id`, `transitions[].from_node`/`to_node`).
-   - `BackendCheckpoint` expects `timestamp`, `full_state`, `state_delta` while backend returns `created_at`, `state_snapshot`.
-
-9. **Mock-Only / Unwired Frontend Flows (`frontend/src/app/policies/page.tsx`, `ledger/page.tsx`, `audit/page.tsx`, `run-detail-view.tsx`)**
-   - No `/sandbox` chatbot route and no `/dashboard` overview route (see `frontend/left.md`).
-   - Policies rules list, Ledger rows, and Audit logs are client-side/synthetic (only `GET /v1/capabilities` on Policies is live).
-   - `Cancel run` and `Retry from checkpoint` have no backend endpoints wired.
-   - Local `frontend/node_modules/.bin/tsc` is incomplete (`'tsc' is not recognized`) until a clean `npm install` finishes on host (Docker build handles `npm ci` internally).
+4. **Frontend Prerender & `memory-service` Host Test Tooling**
+   - `npm --prefix frontend run build` (`next build --webpack`) compiles and passes Next.js TypeScript checks, but Windows sandbox blocks `mkdir` on `_not-found` / `_global-error` prerender directories (`EPERM`); run build/up via Docker or outside sandbox.
+   - Host Python lacks `pytest` (`memory-service/tests/test_memory.py` passes syntax check and `load_memory_config_from_env()`, full pytest execution runs in container/venv with `requirements.txt`).
