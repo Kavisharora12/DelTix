@@ -29,7 +29,7 @@ const SCENES: Scene[] = [
   {
     title: "1. The Invoice Ingestion",
     tag: "INGEST_DATA",
-    tagColor: "bg-blue-3 border-blue-6 text-blue-11",
+    tagColor: "bg-[#E8602E]/15 border-[#E8602E]/40 text-[#E8602E]",
     speech: "Here's Invoice #INV-20418 for $1,250.00!",
     detail: "Vendor submits an invoice. DelTix reads raw PDF tables, line items, and bank routing credentials into structured data.",
     highlight: "Raw PDF extracted: Freight $450 + Customs $600 + Handling $200",
@@ -53,7 +53,7 @@ const SCENES: Scene[] = [
   {
     title: "4. Human Controller Dual-Key Sign",
     tag: "HMAC_RELEASE",
-    tagColor: "bg-purple-3 border-purple-6 text-purple-11",
+    tagColor: "bg-[#E8602E]/15 border-[#E8602E]/40 text-[#E8602E]",
     speech: "Line items verified against contract PO. Signed with HMAC token!",
     detail: "Human controller reviews invoice grounding and stamps a cryptographic HMAC signature (atok_live_...).",
     highlight: "HMAC_SHA256 signature minted: atok_live_9941_sig",
@@ -88,8 +88,8 @@ export function StickmanStory() {
       <div className="px-5 py-3 border-b border-slate-5/80 bg-slate-2/60 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="flex h-2 w-2 relative">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-9 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-9" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#E8602E] opacity-75" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-[#E8602E]" />
           </span>
           <span className="font-mono text-ui-xs font-semibold text-slate-12">
             DELTIX WORKFLOW ANIMATION
@@ -142,13 +142,13 @@ export function StickmanStory() {
         <div
           className={`absolute w-72 h-72 rounded-full blur-3xl opacity-20 pointer-events-none transition-colors duration-700 ${
             activeScene === 0
-              ? "bg-blue-9"
+              ? "bg-[#E8602E]"
               : activeScene === 1
               ? "bg-green-9"
               : activeScene === 2
               ? "bg-amber-9"
               : activeScene === 3
-              ? "bg-purple-9"
+              ? "bg-[#E8602E]"
               : "bg-emerald-9"
           }`}
         />
@@ -177,25 +177,25 @@ export function StickmanStory() {
 
               {/* Glowing Invoice Document in Hand */}
               <g className="animate-bounce" style={{ animationDuration: "2s" }}>
-                <rect x="185" y="115" width="28" height="38" rx="3" fill="var(--slate2)" stroke="var(--blue9)" strokeWidth="2" />
-                <line x1="191" y1="123" x2="207" y2="123" stroke="var(--blue11)" strokeWidth="1.5" />
+                <rect x="185" y="115" width="28" height="38" rx="3" fill="var(--slate2)" stroke="#E8602E" strokeWidth="2" />
+                <line x1="191" y1="123" x2="207" y2="123" stroke="#E8602E" strokeWidth="1.5" />
                 <line x1="191" y1="129" x2="203" y2="129" stroke="var(--slate10)" strokeWidth="1.5" />
                 <line x1="191" y1="135" x2="205" y2="135" stroke="var(--slate10)" strokeWidth="1.5" />
-                <text x="194" y="147" fill="var(--blue11)" fontSize="9" fontWeight="bold" fontFamily="monospace">$</text>
+                <text x="194" y="147" fill="#E8602E" fontSize="9" fontWeight="bold" fontFamily="monospace">$</text>
               </g>
 
               {/* Ingestion beam particles */}
-              <line x1="218" y1="134" x2="365" y2="134" stroke="var(--blue9)" strokeWidth="1.5" strokeDasharray="4 4" className="animate-pulse" />
+              <line x1="218" y1="134" x2="365" y2="134" stroke="#E8602E" strokeWidth="1.5" strokeDasharray="4 4" className="animate-pulse" />
 
               {/* DelTix AI Agent Stickman */}
-              <circle cx="400" cy="105" r="14" stroke="var(--blue9)" strokeWidth="2.5" fill="var(--blue3)" />
-              <circle cx="396" cy="103" r="1.5" fill="var(--blue11)" />
-              <line x1="400" y1="119" x2="400" y2="155" stroke="var(--blue9)" strokeWidth="2.5" />
-              <line x1="400" y1="130" x2="365" y2="135" stroke="var(--blue9)" strokeWidth="2.5" />
-              <line x1="400" y1="130" x2="425" y2="145" stroke="var(--blue9)" strokeWidth="2.5" />
-              <line x1="400" y1="155" x2="385" y2="185" stroke="var(--blue9)" strokeWidth="2.5" />
-              <line x1="400" y1="155" x2="415" y2="185" stroke="var(--blue9)" strokeWidth="2.5" />
-              <text x="400" y="82" textAnchor="middle" fill="var(--blue11)" fontSize="12" fontWeight="bold" fontFamily="sans-serif">
+              <circle cx="400" cy="105" r="14" stroke="#E8602E" strokeWidth="2.5" fill="rgba(232, 96, 46, 0.16)" />
+              <circle cx="396" cy="103" r="1.5" fill="#E8602E" />
+              <line x1="400" y1="119" x2="400" y2="155" stroke="#E8602E" strokeWidth="2.5" />
+              <line x1="400" y1="130" x2="365" y2="135" stroke="#E8602E" strokeWidth="2.5" />
+              <line x1="400" y1="130" x2="425" y2="145" stroke="#E8602E" strokeWidth="2.5" />
+              <line x1="400" y1="155" x2="385" y2="185" stroke="#E8602E" strokeWidth="2.5" />
+              <line x1="400" y1="155" x2="415" y2="185" stroke="#E8602E" strokeWidth="2.5" />
+              <text x="400" y="82" textAnchor="middle" fill="#E8602E" fontSize="12" fontWeight="bold" fontFamily="sans-serif">
                 DelTix AI Agent
               </text>
             </g>
@@ -217,17 +217,17 @@ export function StickmanStory() {
               </text>
 
               {/* Glowing High-Precision Calculator Blackboard */}
-              <rect x="215" y="80" width="240" height="85" rx="8" fill="var(--slate2)" stroke="var(--green9)" strokeWidth="2" />
+              <rect x="215" y="80" width="275" height="85" rx="8" fill="var(--slate2)" stroke="var(--green9)" strokeWidth="2" />
               <text x="230" y="103" fill="var(--slate10)" fontSize="11" fontFamily="monospace">
                 AST Decimal Recomputation:
               </text>
               <text x="230" y="124" fill="var(--slate12)" fontSize="13" fontFamily="monospace">
                 $450.00 + $600.00 + $200.00
               </text>
-              <text x="230" y="148" fill="var(--green11)" fontSize="16" fontWeight="bold" fontFamily="monospace">
+              <text x="230" y="148" fill="var(--green11)" fontSize="15" fontWeight="bold" fontFamily="monospace">
                 = $1,250.00 USD ✓
               </text>
-              <text x="400" y="148" fill="var(--slate9)" fontSize="10" fontFamily="sans-serif">
+              <text x="392" y="148" fill="var(--slate9)" fontSize="10" fontFamily="sans-serif">
                 (0.00% variance)
               </text>
             </g>
@@ -247,20 +247,20 @@ export function StickmanStory() {
                 Policy Intercept
               </text>
 
-              {/* Massive Protective Shield */}
+              {/* Massive Protective Shield (wider so text fits cleanly inside) */}
               <path
-                d="M 285 70 Q 335 55 385 70 Q 385 130 335 165 Q 285 130 285 70 Z"
+                d="M 265 68 Q 345 52 425 68 Q 425 138 345 174 Q 265 138 265 68 Z"
                 fill="var(--amber3)"
                 stroke="var(--amber9)"
                 strokeWidth="2.5"
               />
-              <text x="335" y="105" textAnchor="middle" fill="var(--amber12)" fontSize="13" fontWeight="bold" fontFamily="sans-serif">
+              <text x="345" y="102" textAnchor="middle" fill="var(--amber12)" fontSize="12.5" fontWeight="bold" fontFamily="sans-serif">
                 HALT SAFE
               </text>
-              <text x="335" y="125" textAnchor="middle" fill="var(--amber11)" fontSize="11" fontWeight="bold" fontFamily="monospace">
+              <text x="345" y="121" textAnchor="middle" fill="var(--amber11)" fontSize="10.5" fontWeight="bold" fontFamily="monospace">
                 &gt; $500.00 CAP
               </text>
-              <text x="335" y="142" textAnchor="middle" fill="var(--amber10)" fontSize="9" fontFamily="sans-serif">
+              <text x="345" y="138" textAnchor="middle" fill="var(--amber10)" fontSize="8.5" fontFamily="sans-serif">
                 Paused for Human Sign-off
               </text>
             </g>
@@ -270,23 +270,23 @@ export function StickmanStory() {
           {activeScene === 3 && (
             <g className="animate-in fade-in zoom-in-95 duration-300">
               {/* Human Controller Stickman */}
-              <circle cx="160" cy="105" r="14" stroke="var(--purple9)" strokeWidth="2.5" fill="var(--purple3)" />
-              <circle cx="165" cy="103" r="1.5" fill="var(--purple11)" />
-              <line x1="160" y1="119" x2="160" y2="155" stroke="var(--purple9)" strokeWidth="2.5" />
-              <line x1="160" y1="130" x2="200" y2="135" stroke="var(--purple9)" strokeWidth="2.5" />
-              <line x1="160" y1="130" x2="140" y2="145" stroke="var(--purple9)" strokeWidth="2.5" />
-              <line x1="160" y1="155" x2="145" y2="185" stroke="var(--purple9)" strokeWidth="2.5" />
-              <line x1="160" y1="155" x2="175" y2="185" stroke="var(--purple9)" strokeWidth="2.5" />
-              <text x="160" y="82" textAnchor="middle" fill="var(--purple11)" fontSize="12" fontWeight="bold" fontFamily="sans-serif">
+              <circle cx="160" cy="105" r="14" stroke="#E8602E" strokeWidth="2.5" fill="rgba(232, 96, 46, 0.2)" />
+              <circle cx="165" cy="103" r="1.5" fill="#FFFFFF" />
+              <line x1="160" y1="119" x2="160" y2="155" stroke="#E8602E" strokeWidth="2.5" />
+              <line x1="160" y1="130" x2="200" y2="135" stroke="#E8602E" strokeWidth="2.5" />
+              <line x1="160" y1="130" x2="140" y2="145" stroke="#E8602E" strokeWidth="2.5" />
+              <line x1="160" y1="155" x2="145" y2="185" stroke="#E8602E" strokeWidth="2.5" />
+              <line x1="160" y1="155" x2="175" y2="185" stroke="#E8602E" strokeWidth="2.5" />
+              <text x="160" y="82" textAnchor="middle" fill="#FFFFFF" fontSize="12" fontWeight="bold" fontFamily="sans-serif">
                 Controller (You)
               </text>
 
               {/* Cryptographic Stamp Card */}
-              <rect x="215" y="95" width="180" height="60" rx="6" fill="var(--slate2)" stroke="var(--purple9)" strokeWidth="2" />
-              <text x="230" y="118" fill="var(--purple11)" fontSize="12" fontWeight="bold" fontFamily="sans-serif">
+              <rect x="215" y="95" width="205" height="60" rx="6" fill="var(--slate2)" stroke="#E8602E" strokeWidth="2" />
+              <text x="230" y="118" fill="#E8602E" fontSize="12" fontWeight="bold" fontFamily="sans-serif">
                 ✓ DUAL-KEY AUTHORIZED
               </text>
-              <text x="230" y="138" fill="var(--slate10)" fontSize="10" fontFamily="monospace">
+              <text x="230" y="138" fill="var(--slate11)" fontSize="10" fontFamily="monospace">
                 HMAC: atok_live_9941_sig
               </text>
             </g>
@@ -332,9 +332,9 @@ export function StickmanStory() {
           )}
 
           {/* Speech dialogue bubble floating above characters */}
-          <rect x="130" y="16" width="340" height="38" rx="6" fill="var(--panel-bg)" stroke="var(--slate5)" strokeWidth="1.5" />
+          <rect x="80" y="16" width="440" height="38" rx="6" fill="var(--panel-bg)" stroke="var(--slate5)" strokeWidth="1.5" />
           <polygon points="280,54 290,64 300,54" fill="var(--panel-bg)" stroke="var(--slate5)" strokeWidth="1.5" />
-          <text x="300" y="40" textAnchor="middle" fill="var(--text-primary)" fontSize="12" fontWeight="500" fontFamily="sans-serif">
+          <text x="300" y="39" textAnchor="middle" fill="var(--text-primary)" fontSize="11.5" fontWeight="500" fontFamily="sans-serif">
             {scene.speech}
           </text>
         </svg>
@@ -350,7 +350,7 @@ export function StickmanStory() {
                 setIsPlaying(false);
               }}
               className={`h-2 rounded-full transition-all duration-300 ${
-                idx === activeScene ? "w-7 bg-blue-9" : "w-2 bg-slate-6 hover:bg-slate-5"
+                idx === activeScene ? "w-7 bg-[#E8602E]" : "w-2 bg-slate-6 hover:bg-slate-5"
               }`}
               title={`Jump to scene ${idx + 1}`}
             />
@@ -360,8 +360,8 @@ export function StickmanStory() {
 
       {/* Detail Footer */}
       <div className="p-5 bg-panel/90 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-slate-5/80">
-        <div className="space-y-1 max-w-xl">
-          <div className="flex items-center gap-2">
+        <div className="space-y-1.5 min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-title-section text-slate-12 font-semibold">{scene.title}</span>
             <span className={`font-mono text-ui-xs px-2 py-0.5 rounded border ${scene.tagColor}`}>
               {scene.tag}
@@ -370,9 +370,9 @@ export function StickmanStory() {
           <p className="text-ui-xs text-slate-10 leading-relaxed">
             {scene.detail}
           </p>
-          <div className="text-[11px] font-mono text-slate-11 pt-1 flex items-center gap-1.5">
-            <span className="text-slate-9 font-sans">Under the hood:</span>
-            <code className="text-blue-11">{scene.highlight}</code>
+          <div className="text-[11px] font-mono text-slate-11 pt-1 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+            <span className="text-slate-9 font-sans shrink-0">Under the hood:</span>
+            <code className="text-[#E8602E] break-all">{scene.highlight}</code>
           </div>
         </div>
 

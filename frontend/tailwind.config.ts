@@ -127,6 +127,13 @@ const config: Config = {
           11: "#c084fc",
           12: "#f3e8ff",
         },
+        terracotta: {
+          DEFAULT: "#E8602E",
+          hover: "#f07243",
+          muted: "rgba(232, 96, 46, 0.14)",
+          border: "rgba(232, 96, 46, 0.35)",
+        },
+        cream: "#FFF3EF",
       },
       fontSize: {
         ui: ["13px", { lineHeight: "1.45" }],
@@ -136,8 +143,9 @@ const config: Config = {
         "title-section": ["14px", { lineHeight: "1.3", letterSpacing: "-0.01em", fontWeight: "600" }],
       },
       fontFamily: {
-        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "'Segoe UI'", "Roboto", "sans-serif"],
-        mono: ["'JetBrains Mono'", "'SF Mono'", "Consolas", "'Liberation Mono'", "Menlo", "Courier", "monospace"],
+        sans: ["var(--font-manrope)", "Inter", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+        display: ['"Neue Machina"', "var(--font-manrope)", "sans-serif"],
+        mono: ["var(--font-mono)", "'JetBrains Mono'", "'SF Mono'", "Consolas", "monospace"],
       },
       borderRadius: {
         badge: "4px",

@@ -323,7 +323,7 @@ export default function StudioNewPage() {
                 ) : (
                   <>
                     <Sparkles className="h-4 w-4" />
-                    Compile Financial Agent ⚡
+                    Compile Financial Agent
                   </>
                 )}
               </Button>
@@ -367,55 +367,6 @@ export default function StudioNewPage() {
                     VALIDATION FAILED
                   </span>
                 )}
-              </div>
-            </div>
-
-            {/* Financial Guardrails Detected */}
-            <div className="bg-panel border border-slate-5 rounded-card p-4 space-y-3">
-              <div className="text-xs font-semibold text-slate-12 flex items-center gap-1.5">
-                <ShieldCheck className="h-4 w-4 text-green-9" />
-                <span>Financial Guardrails Detected</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div className="p-2.5 rounded bg-slate-2 border border-slate-5">
-                  <div className="text-[11px] text-slate-9 uppercase font-mono">
-                    {compileResult?.agent_ir?.policies ? "Sealed Spend Cap" : "Draft Spend Cap"}
-                  </div>
-                  <div className="font-mono font-medium text-slate-12 mt-0.5">
-                    {compileResult?.agent_ir?.policies
-                      ? `$${Number(compileResult.agent_ir.policies.max_budget_usd ?? 0).toFixed(2)} USD / run`
-                      : applyQuickSettings && spendCap > 0
-                        ? `$${spendCap.toFixed(2)} USD / run`
-                        : "Unset (Compiler asks)"}
-                  </div>
-                </div>
-                <div className="p-2.5 rounded bg-slate-2 border border-slate-5">
-                  <div className="text-[11px] text-slate-9 uppercase font-mono">
-                    {compileResult?.agent_ir?.policies ? "Sealed Approval Gate" : "Draft Approval Gate"}
-                  </div>
-                  <div className="font-mono font-medium text-slate-12 mt-0.5">
-                    {compileResult?.agent_ir?.policies
-                      ? compileResult.agent_ir.policies.require_human_approval
-                        ? `Human Sign-Off${approvalThreshold > 0 && applyQuickSettings ? ` (> $${approvalThreshold.toFixed(2)})` : ""}`
-                        : "Auto-Execute"
-                      : applyQuickSettings && approvalThreshold > 0
-                        ? `Above $${approvalThreshold.toFixed(2)} USD`
-                        : "Unset (Compiler asks)"}
-                  </div>
-                </div>
-                <div className="p-2.5 rounded bg-slate-2 border border-slate-5">
-                  <div className="text-[11px] text-slate-9 uppercase font-mono">Math Engine</div>
-                  <div className="font-mono font-medium text-slate-12 mt-0.5">
-                    Python Decimal AST
-                  </div>
-                </div>
-                <div className="p-2.5 rounded bg-slate-2 border border-slate-5">
-                  <div className="text-[11px] text-slate-9 uppercase font-mono">Grounding Policy</div>
-                  <div className="font-mono font-medium text-slate-12 mt-0.5">
-                    RAG Quote Match
-                  </div>
-                </div>
               </div>
             </div>
 
@@ -516,7 +467,7 @@ export default function StudioNewPage() {
               {nodes.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center p-6 text-slate-9 text-xs">
                   <FileCode className="h-8 w-8 text-slate-7 mb-2" />
-                  <span>Click &quot;Compile Financial Agent ⚡&quot; to synthesize execution graph</span>
+                  <span>Click &quot;Compile Financial Agent&quot; to synthesize execution graph</span>
                 </div>
               ) : (
                 <div className="space-y-1.5 font-mono text-xs overflow-y-auto max-h-64">

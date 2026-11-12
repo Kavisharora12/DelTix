@@ -2,6 +2,30 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Neue Machina";
+  src: url("/fonts/NeueMachina-Light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Machina";
+  src: url("/fonts/NeueMachina-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Neue Machina";
+  src: url("/fonts/NeueMachina-Ultrabold.woff2") format("woff2");
+  font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer base {
   :root {
     /* Dark Theme is default */
@@ -209,5 +233,110 @@
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* Subtle geometric grid backdrop for landing hero */
+.bg-grid-pattern {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+@keyframes marquee-left {
+  0% {
+    transform: translateX(0%);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes marquee-right {
+  0% {
+    transform: translateX(-50%);
+  }
+  100% {
+    transform: translateX(0%);
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    opacity: 0.75;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+@keyframes fade-in-up {
+  0% {
+    opacity: 0;
+    transform: translateY(24px);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+.animate-marquee-left {
+  animation: marquee-left 28s linear infinite;
+}
+
+.animate-marquee-right {
+  animation: marquee-right 33s linear infinite;
+}
+
+.animate-marquee-left-slow {
+  animation: marquee-left 33s linear infinite;
+}
+
+.group\/marquee:hover .animate-marquee-left,
+.group\/marquee:hover .animate-marquee-right,
+.group\/marquee:hover .animate-marquee-left-slow {
+  animation-play-state: paused;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 5s ease-in-out infinite;
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.sheryians-cta {
+  background-image: linear-gradient(96.76deg, #e8602e 5.3%, #340e00 234.66%);
+  background-size: 150% 100%;
+  background-position: right center;
+  transition: background-position 300ms ease, box-shadow 300ms ease, transform 200ms ease;
+}
+
+.sheryians-cta:hover {
+  background-position: left center;
+  box-shadow: 0 0px 40px 5px rgba(232, 96, 46, 0.5);
+}
+
+/* Sheryians scroll-reveal entrance (fadeInScroll) */
+.reveal-hidden {
+  opacity: 0.2;
+  transform: translateY(36px);
+  filter: blur(8px);
+}
+
+.reveal-visible {
+  opacity: 1;
+  transform: translateY(0);
+  filter: blur(0);
+  transition: opacity 0.75s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.75s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.75s cubic-bezier(0.22, 1, 0.36, 1);
 }
 

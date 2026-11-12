@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 64" fill="none">
+  <!-- Geometric faceted D mark -->
+  <!-- Top-left facet -->
+  <polygon points="8,8 40,18 28,26" fill="#FFFFFF" />
+  <!-- Upper-left inner triangle -->
+  <polygon points="10,13 26,28 16,32" fill="#FFFFFF" />
+  <!-- Center-left play/arrow facet -->
+  <polygon points="18,22 34,32 18,42" fill="#FFFFFF" />
+  <!-- Lower-left inner triangle -->
+  <polygon points="10,51 26,36 16,32" fill="#FFFFFF" />
+  <!-- Bottom-left facet -->
+  <polygon points="8,56 40,46 28,38" fill="#FFFFFF" />
+
+  <!-- Right curved D arc -->
+  <path
+    d="M36 9 C56 9 68 19 68 32 C68 45 56 55 36 55 L30 47 C47 47 57 40 57 32 C57 24 47 17 30 17 Z"
+    fill="#FFFFFF"
+  />
+
+  <!-- Circuit nodes inside D -->
+  <line x1="37" y1="21" x2="48" y2="32" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" />
+  <line x1="48" y1="32" x2="37" y2="43" stroke="#FFFFFF" stroke-width="2.4" stroke-linecap="round" />
+  <circle cx="37" cy="21" r="3.2" fill="#FFFFFF" />
+  <circle cx="48" cy="32" r="3.2" fill="#FFFFFF" />
+  <circle cx="37" cy="43" r="3.2" fill="#FFFFFF" />
+
+  <!-- Vertical divider -->
+  <line x1="82" y1="10" x2="82" y2="54" stroke="#FFFFFF" stroke-width="1.5" stroke-opacity="0.85" />
+
+  <!-- DelTix wordmark -->
+  <text
+    x="98"
+    y="44"
+    fill="#FFFFFF"
+    font-family="Manrope, Inter, -apple-system, BlinkMacSystemFont, sans-serif"
+    font-size="34"
+    font-weight="500"
+    letter-spacing="-0.02em"
+  >DelTix</text>
+</svg>

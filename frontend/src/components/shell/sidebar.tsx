@@ -4,18 +4,14 @@ import React, { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Home,
   LayoutDashboard,
   Play,
   CheckCircle2,
   Bot,
   ShieldCheck,
-  BookOpen,
   FileText,
-  ChevronDown,
   PanelLeftClose,
   PanelLeft,
-  Building2,
   Sparkles,
   Terminal,
 } from "lucide-react";
@@ -74,58 +70,36 @@ export function Sidebar() {
       match: (p: string) => p.startsWith("/policies"),
     },
     {
-      label: "Ledger",
-      href: "/ledger",
-      icon: BookOpen,
-      match: (p: string) => p.startsWith("/ledger"),
-    },
-    {
       label: "Audit log",
       href: "/audit",
       icon: FileText,
       match: (p: string) => p.startsWith("/audit"),
-    },
-    {
-      label: "Landing & Story",
-      href: "/",
-      icon: Home,
-      match: (p: string) => p === "/",
     },
   ];
 
   return (
     <aside
       className={cn(
-        "h-screen bg-panel border-r border-slate-5 flex flex-col shrink-0 transition-all duration-fast select-none relative",
-        collapsed ? "w-14" : "w-[232px]"
+        "h-screen bg-[#050505] border-r border-[#232323] flex flex-col shrink-0 transition-all duration-fast select-none relative font-sans",
+        collapsed ? "w-14" : "w-[236px]"
       )}
     >
       {/* Workspace Switcher */}
-      <div className="h-12 border-b border-slate-5 flex items-center justify-between px-3">
+      <div className="h-14 border-b border-[#232323] flex items-center justify-between px-4">
         {!collapsed ? (
-          <div className="flex items-center gap-2 truncate">
-            <div className="w-5 h-5 rounded bg-slate-12 text-slate-1 flex items-center justify-center font-bold text-xs">
-              Δ
-            </div>
-            <div className="truncate">
-              <div className="text-ui text-slate-12 font-medium leading-none truncate">
-                DelTix Ops
-              </div>
-              <div className="text-[11px] font-mono text-slate-10 mt-0.5 truncate">
-                {tenantId}
-              </div>
-            </div>
-          </div>
+          <Link href="/" className="flex items-center gap-2 truncate" title={tenantId || "DelTix"}>
+            <img src="/deltix-logo.svg" alt="DelTix" className="h-6 w-auto object-contain" />
+          </Link>
         ) : (
-          <div className="w-6 h-6 rounded bg-slate-12 text-slate-1 flex items-center justify-center font-bold text-xs mx-auto">
-            Δ
-          </div>
+          <Link href="/" className="mx-auto" title={tenantId || "DelTix"}>
+            <img src="/deltix-logo.svg" alt="DelTix" className="h-5 w-5 object-contain object-left" />
+          </Link>
         )}
 
         <button
           type="button"
           onClick={() => setCollapsed(!collapsed)}
-          className="text-slate-10 hover:text-slate-12 p-1 rounded hover:bg-slate-4"
+          className="text-[#898989] hover:text-white p-1.5 rounded-md hover:bg-[#121212] transition-colors"
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? <PanelLeft className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
@@ -133,7 +107,7 @@ export function Sidebar() {
       </div>
 
       {/* Nav List */}
-      <nav className="flex-1 py-3 px-2 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 py-4 px-2.5 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
           const active = item.match(pathname);
           const Icon = item.icon;
@@ -143,21 +117,21 @@ export function Sidebar() {
               key={item.href}
               href={item.href}
               className={cn(
-                "h-8 flex items-center gap-2.5 px-2.5 rounded-btn text-ui transition-colors relative group",
+                "h-9 flex items-center gap-2.5 px-3 rounded-lg text-[13.5px] transition-colors relative group",
                 active
-                  ? "bg-slate-4 text-slate-12 font-medium"
-                  : "text-slate-11 hover:text-slate-12 hover:bg-slate-3"
+                  ? "bg-[#0E0E0E] border border-[#232323] text-white font-medium"
+                  : "text-[#898989] hover:text-white hover:bg-[#0A0A0A] border border-transparent"
               )}
             >
-              {/* Selected 2px left bar in blue9 */}
+              {/* Selected 2px left bar in DelTix orange */}
               {active && (
-                <span className="absolute left-0 top-1.5 bottom-1.5 w-[2px] bg-blue-9 rounded-r" />
+                <span className="absolute left-0 top-2 bottom-2 w-[2px] bg-[#E8602E] rounded-r" />
               )}
 
               <Icon
                 className={cn(
                   "h-4 w-4 shrink-0 transition-colors",
-                  active ? "text-slate-12" : "text-slate-10 group-hover:text-slate-11"
+                  active ? "text-[#E8602E]" : "text-[#898989] group-hover:text-white"
                 )}
               />
 
@@ -178,18 +152,6 @@ export function Sidebar() {
           );
         })}
       </nav>
-
-      {/* Footer Info */}
-      <div className="p-3 border-t border-slate-5 text-[11px] text-slate-10">
-        {!collapsed ? (
-          <div className="flex items-center justify-between">
-            <span className="font-mono">DelTix v1.0</span>
-            <span className="text-slate-9">PayPal Sandbox</span>
-          </div>
-        ) : (
-          <div className="text-center font-mono">v1.0</div>
-        )}
-      </div>
     </aside>
   );
 }

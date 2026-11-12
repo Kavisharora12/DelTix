@@ -4,7 +4,6 @@ import React, { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Sidebar } from "./sidebar";
 import { TopBar } from "./topbar";
-import { SandboxBanner } from "@/components/ui/env-pill";
 import { HandsOnTourHUD } from "@/components/onboarding/hands-on-tour-hud";
 import { ShortcutsModal } from "./shortcuts-modal";
 import { useGlobalShortcuts } from "@/lib/use-global-shortcuts";
@@ -50,9 +49,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
         {/* Topbar */}
         <TopBar onOpenShortcuts={() => setShortcutsOpen(true)} />
-
-        {/* Mandatory Sandbox Banner if in Sandbox Mode */}
-        <SandboxBanner mode={environment} />
 
         {/* Scrollable Console Page Content */}
         <main className="flex-1 overflow-y-auto bg-app">
