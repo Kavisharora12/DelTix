@@ -1,6 +1,6 @@
 # DelTix
 
-Geo-Distributed Financial AI Agent Compiler and Stateful Runtime Platform with Closed-World Capability Binding, Externalized Go Policy Guardrails, and Idempotent PayPal Sandbox Execution.
+Geo-Distributed Financial AI Agent Compiler and Stateful Runtime Platform with Closed-World Capability Binding, Externalized Go Policy Guardrails, and Idempotent PayPal Sandbox Execution..
 
 Target Track: PayPal AI Hackathon (Agentic Commerce / Best Use of PayPal + AI)
 
