@@ -142,10 +142,10 @@ export default function PoliciesPage() {
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-app select-none">
       {/* Header */}
-      <div className="border-b border-slate-5 bg-panel p-4 flex items-center justify-between shrink-0">
+      <div className="border-b border-slate-5 bg-panel px-6 md:px-8 py-6 flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-title-page text-slate-12">Spend Policies & Capability Guards</h1>
-          <p className="text-ui text-slate-10 mt-0.5">
+          <h1 className="font-display text-title-page text-slate-12">Spend Policies &amp; Capability Guards</h1>
+          <p className="text-ui font-light text-slate-10 mt-1">
             Deterministic security boundaries executed outside LLMs to safeguard treasury balances.
           </p>
         </div>

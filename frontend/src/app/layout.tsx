@@ -17,7 +17,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "DelTix — Payment Operations & Agentic Control Console",
+  title: "DelTix",
   description:
     "Deterministic financial agent orchestration, verification, and human-in-the-loop approvals console.",
 };

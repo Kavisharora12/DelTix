@@ -353,28 +353,28 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
   };
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-1 overflow-hidden select-none">
+    <div className="flex-1 flex flex-col h-full bg-[#000000] overflow-hidden select-none font-sans">
       {/* Top Banner */}
-      <div className="h-12 border-b border-slate-5 bg-panel px-6 flex items-center justify-between shrink-0">
+      <div className="h-14 border-b border-[#232323] bg-[#050505] px-6 md:px-8 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <Terminal className="h-4 w-4 text-blue-11" />
-            <span className="text-sm font-semibold text-slate-12">Live Agent Sandbox</span>
+          <div className="flex items-center gap-2.5">
+            <Terminal className="h-4 w-4 text-[#E8602E]" />
+            <span className="font-display text-lg text-white">Live Agent Sandbox</span>
           </div>
-          <span className="text-slate-7 hidden sm:inline">&bull;</span>
-          <span className="text-xs text-slate-10 hidden sm:inline">
+          <span className="text-[#4E4A48] hidden sm:inline">&bull;</span>
+          <span className="text-xs text-[#898989] hidden sm:inline">
             Interactive Testbed &amp; Live SSE Telemetry
           </span>
         </div>
 
         <div className="flex items-center gap-3">
-          <label className="text-xs text-slate-10 font-medium hidden md:inline">
-            Active Specification:
+          <label className="text-xs text-[#898989] font-medium hidden md:inline">
+            Specification:
           </label>
           <select
             value={selectedSpecId}
             onChange={(e) => handleSpecChange(e.target.value)}
-            className="bg-slate-3 border border-slate-5 rounded-btn px-2.5 py-1 text-xs text-slate-12 focus:outline-none focus:border-slate-8 max-w-[220px] truncate"
+            className="bg-[#0C0C0C] border border-[#232323] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#E8602E] max-w-[220px] truncate"
           >
             {specs.map((s) => (
               <option key={s.spec_id} value={s.spec_id}>
@@ -384,59 +384,53 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
           </select>
 
           <Link href="/studio/new">
-            <Button variant="secondary" size="sm" className="h-7 text-xs gap-1.5 hidden sm:flex">
-              <Sparkles className="h-3 w-3" />
+            <Button variant="secondary" size="sm" className="h-8 text-xs gap-1.5 hidden sm:flex">
+              <Sparkles className="h-3 w-3 text-[#E8602E]" />
               Compile New Spec
             </Button>
           </Link>
         </div>
       </div>
 
-      {/* 3-Column Split View: Chat Terminal (36%) + SSE Timeline (36%) + State/Memory Inspector (28%) */}
+      {/* 2-Column Split View: Chat Terminal (48%) + SSE Timeline (52%) */}
       <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
-        {/* 1. Conversational Chat Terminal */}
-        <div className="flex-1 lg:w-[36%] border-r border-slate-5 flex flex-col bg-panel min-h-0">
-          <div className="p-3 border-b border-slate-5 bg-slate-3/30 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-11">
-            <div className="flex items-center gap-1.5">
-              <Bot className="h-3.5 w-3.5 text-blue-9" />
-              <span>1. Conversational Chat Terminal</span>
+        {/* Conversational Chat Terminal */}
+        <div className="flex-1 lg:w-[48%] border-r border-[#232323] flex flex-col bg-[#050505] min-h-0">
+          <div className="px-5 py-3 border-b border-[#232323] bg-[#080808] flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-[#979797]">
+            <div className="flex items-center gap-2">
+              <Bot className="h-3.5 w-3.5 text-[#E8602E]" />
+              <span>Chat Terminal</span>
             </div>
-            <span className="text-[11px] font-mono text-slate-9 lowercase">
-              trigger simulator
-            </span>
-          </div>
-
-          {/* Quick Trigger Preset Pills */}
-          <div className="p-2.5 border-b border-slate-5 bg-slate-2/40 flex items-center gap-1.5 overflow-x-auto text-[11px]">
-            <span className="text-slate-9 shrink-0">Presets:</span>
-            <button
-              type="button"
-              onClick={() =>
-                handleApplyPreset({
-                  prompt: "Customer Alex requests refund for Order #ORD-7712 ($38.00). Item damaged.",
-                  orderId: "ORD-7712",
-                  amount: "38.00",
-                  email: "alex@example.com",
-                })
-              }
-              className="px-2 py-0.5 rounded bg-slate-3 hover:bg-slate-4 border border-slate-5 text-slate-11 shrink-0 font-medium"
-            >
-              $38 Auto-Refund
-            </button>
-            <button
-              type="button"
-              onClick={() =>
-                handleApplyPreset({
-                  prompt: "Customer Jordan requests refund for Order #ORD-9912 ($150.00). Exceeds threshold.",
-                  orderId: "ORD-9912",
-                  amount: "150.00",
-                  email: "jordan@example.com",
-                })
-              }
-              className="px-2 py-0.5 rounded bg-amber-2 hover:bg-amber-3 border border-amber-6 text-amber-11 shrink-0 font-medium"
-            >
-              $150 (Approval Gate)
-            </button>
+            <div className="flex items-center gap-1.5 normal-case font-sans">
+              <button
+                type="button"
+                onClick={() =>
+                  handleApplyPreset({
+                    prompt: "Customer Alex requests refund for Order #ORD-7712 ($38.00). Item damaged.",
+                    orderId: "ORD-7712",
+                    amount: "38.00",
+                    email: "alex@example.com",
+                  })
+                }
+                className="px-2.5 py-1 rounded-md bg-[#0C0C0C] hover:bg-[#141414] border border-[#232323] hover:border-[#4E4A48] text-[11px] text-[#D4D4D4] hover:text-white transition-colors"
+              >
+                $38 Auto-Refund
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  handleApplyPreset({
+                    prompt: "Customer Jordan requests refund for Order #ORD-9912 ($150.00). Exceeds threshold.",
+                    orderId: "ORD-9912",
+                    amount: "150.00",
+                    email: "jordan@example.com",
+                  })
+                }
+                className="px-2.5 py-1 rounded-md bg-amber-950/30 hover:bg-amber-950/50 border border-amber-500/30 text-[11px] text-amber-400 transition-colors"
+              >
+                $150 Approval Gate
+              </button>
+            </div>
           </div>
 
           {/* Chat Messages Stream */}
@@ -489,39 +483,39 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
           </div>
 
           {/* Trigger Input Form */}
-          <div className="p-3 border-t border-slate-5 bg-panel space-y-2.5">
-            <div className="grid grid-cols-3 gap-2 text-xs">
+          <div className="p-4 border-t border-[#232323] bg-[#080808] space-y-3">
+            <div className="grid grid-cols-3 gap-2.5 text-xs">
               <div>
-                <label className="text-[10px] text-slate-9 uppercase font-mono block mb-1">
+                <label className="text-[10px] text-[#898989] uppercase font-mono block mb-1">
                   Order ID
                 </label>
                 <input
                   type="text"
                   value={orderId}
                   onChange={(e) => setOrderId(e.target.value)}
-                  className="w-full px-2 py-1 bg-slate-2 border border-slate-5 rounded text-xs text-slate-12 font-mono focus:outline-none focus:border-slate-8"
+                  className="w-full px-2.5 py-1.5 bg-[#0C0C0C] border border-[#232323] rounded-lg text-xs text-white font-mono focus:outline-none focus:border-[#E8602E]"
                 />
               </div>
               <div>
-                <label className="text-[10px] text-slate-9 uppercase font-mono block mb-1">
+                <label className="text-[10px] text-[#898989] uppercase font-mono block mb-1">
                   Amount (USD)
                 </label>
                 <input
                   type="number"
                   value={amountUSD}
                   onChange={(e) => setAmountUSD(e.target.value)}
-                  className="w-full px-2 py-1 bg-slate-2 border border-slate-5 rounded text-xs text-slate-12 font-mono focus:outline-none focus:border-slate-8"
+                  className="w-full px-2.5 py-1.5 bg-[#0C0C0C] border border-[#232323] rounded-lg text-xs text-white font-mono focus:outline-none focus:border-[#E8602E]"
                 />
               </div>
               <div>
-                <label className="text-[10px] text-slate-9 uppercase font-mono block mb-1">
+                <label className="text-[10px] text-[#898989] uppercase font-mono block mb-1">
                   Customer Email
                 </label>
                 <input
                   type="email"
                   value={customerEmail}
                   onChange={(e) => setCustomerEmail(e.target.value)}
-                  className="w-full px-2 py-1 bg-slate-2 border border-slate-5 rounded text-xs text-slate-12 font-mono focus:outline-none focus:border-slate-8"
+                  className="w-full px-2.5 py-1.5 bg-[#0C0C0C] border border-[#232323] rounded-lg text-xs text-white font-mono focus:outline-none focus:border-[#E8602E]"
                 />
               </div>
             </div>
@@ -538,14 +532,14 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
                     handleStartRun();
                   }
                 }}
-                className="flex-1 px-3 py-1.5 bg-slate-2 border border-slate-5 rounded-btn text-xs text-slate-12 focus:outline-none focus:border-slate-8"
+                className="flex-1 px-3 py-2 bg-[#0C0C0C] border border-[#232323] rounded-lg text-xs text-white placeholder-[#6B6B6B] focus:outline-none focus:border-[#E8602E]"
               />
               <Button
                 variant="primary"
                 size="sm"
                 onClick={handleStartRun}
                 disabled={isRunning || !selectedSpecId}
-                className="h-8 px-3 gap-1.5 text-xs font-semibold shrink-0"
+                className="h-9 px-4 gap-1.5 text-xs font-medium shrink-0"
               >
                 {isRunning ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -558,12 +552,12 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
           </div>
         </div>
 
-        {/* 2. Live Execution Timeline (SSE) */}
-        <div className="flex-1 lg:w-[36%] border-r border-slate-5 flex flex-col bg-slate-2/40 min-h-0">
-          <div className="p-3 border-b border-slate-5 bg-panel flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-11">
-            <div className="flex items-center gap-1.5">
-              <Layers className="h-3.5 w-3.5 text-green-9" />
-              <span>2. Live Execution Timeline (SSE)</span>
+        {/* Live Execution Timeline (SSE) */}
+        <div className="flex-1 lg:w-[52%] flex flex-col bg-[#000000] min-h-0">
+          <div className="px-5 py-3 border-b border-[#232323] bg-[#080808] flex items-center justify-between text-[11px] font-mono uppercase tracking-wider text-[#979797]">
+            <div className="flex items-center gap-2">
+              <Layers className="h-3.5 w-3.5 text-emerald-400" />
+              <span>Live Execution Timeline (SSE)</span>
             </div>
             <div className="flex items-center gap-2">
               {activeRunId && (
@@ -667,91 +661,6 @@ export function SandboxClient({ initialSpecId }: SandboxClientProps) {
               <span className="text-slate-12 font-bold">${cumulativeSpend.toFixed(2)} USD</span>
             </div>
           )}
-        </div>
-
-        {/* 3. State, Memory & Integrity Inspector */}
-        <div className="flex-1 lg:w-[28%] flex flex-col bg-panel min-h-0 overflow-y-auto p-4 space-y-4">
-          <div className="pb-3 border-b border-slate-5 flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-slate-11">
-            <div className="flex items-center gap-1.5">
-              <Cpu className="h-3.5 w-3.5 text-purple-9" />
-              <span>3. State &amp; Integrity Inspector</span>
-            </div>
-          </div>
-
-          {/* Zero-Hallucination Integrity Badges */}
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-slate-12">Cryptographic Safety Proofs</div>
-            <div className="space-y-1.5 text-xs font-mono">
-              <div className="p-2 rounded bg-green-2 border border-green-6/50 text-green-12 flex items-center justify-between">
-                <span>[AST Math Engine]</span>
-                <span className="font-semibold text-green-11">0 Variance ✓</span>
-              </div>
-              <div className="p-2 rounded bg-blue-2 border border-blue-6/50 text-blue-12 flex items-center justify-between">
-                <span>[Grounding Verifier]</span>
-                <span className="font-semibold text-blue-11">Quote Proof ✓</span>
-              </div>
-              <div className="p-2 rounded bg-purple-2 border border-purple-6/50 text-purple-12 flex items-center justify-between">
-                <span>[PII Redaction]</span>
-                <span className="font-semibold text-purple-11">Sanitized ✓</span>
-              </div>
-              <div className="p-2 rounded bg-slate-2 border border-slate-5 text-slate-11 flex items-center justify-between">
-                <span>[HMAC Readiness]</span>
-                <span className="font-semibold text-slate-12">Sealed ✓</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Readable Execution Inputs & Variables */}
-          <div className="flex-1 flex flex-col min-h-0">
-            <div className="text-xs font-medium text-slate-12 mb-1.5 flex items-center justify-between">
-              <span>Run Inputs &amp; State</span>
-              <span className="text-[10px] font-mono text-slate-9">Step Telemetry</span>
-            </div>
-            <div className="flex-1 p-3 rounded-card bg-slate-2 border border-slate-5 text-[11px] text-slate-11 overflow-auto max-h-56 space-y-1.5">
-              {Object.keys(stateSnapshot).length > 0 ? (
-                Object.entries(
-                  (stateSnapshot.inputs && typeof stateSnapshot.inputs === "object"
-                    ? { ...stateSnapshot.inputs, ...(stateSnapshot.variables || {}) }
-                    : stateSnapshot) as Record<string, unknown>
-                )
-                  .filter(([, v]) => v !== undefined && v !== null && typeof v !== "object")
-                  .map(([key, val]) => (
-                    <div key={key} className="flex items-center justify-between gap-2 border-b border-slate-5/50 pb-1 last:border-0">
-                      <span className="font-mono text-slate-9 truncate">{key}</span>
-                      <span className="font-mono text-slate-12 truncate max-w-[180px]">{String(val)}</span>
-                    </div>
-                  ))
-              ) : (
-                <div className="text-slate-8 italic">
-                  Send a test trigger to inspect live run variables.
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Mem0 Customer Memory Panel */}
-          <div className="p-3 rounded-card bg-slate-2/70 border border-slate-5 space-y-1.5">
-            <div className="text-xs font-medium text-slate-12 flex items-center gap-1.5">
-              <Database className="h-3.5 w-3.5 text-blue-9" />
-              <span>Mem0 Persistent Memory Context</span>
-            </div>
-            <div className="text-[11px] text-slate-10 space-y-1 font-mono">
-              <div>User: {customerEmail || "Not specified"}</div>
-              <div>
-                Retrieved Records:{" "}
-                {Array.isArray(stateSnapshot.memory_context) ? stateSnapshot.memory_context.length : 0}
-              </div>
-              {Array.isArray(stateSnapshot.memory_context) && stateSnapshot.memory_context.length > 0 ? (
-                <div className="text-green-11">
-                  Loaded from Supabase pgvector for this run
-                </div>
-              ) : (
-                <div className="text-slate-9">
-                  No prior memories loaded for this run yet.
-                </div>
-              )}
-            </div>
-          </div>
         </div>
       </div>
     </div>

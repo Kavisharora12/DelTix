@@ -13,6 +13,7 @@ import {
   XCircle,
   CircleDashed,
   Loader2,
+  Play,
 } from "lucide-react";
 import { NodeType, NodeStatus } from "@/types";
 import { cn } from "@/lib/utils";
@@ -26,80 +27,93 @@ interface NodeData {
 
 export function CustomNode(props: any) {
   const { data, selected } = props;
-  const { title, type, status } = (data || {}) as NodeData;
+  const { title, type, status, nodeId } = (data || {}) as NodeData;
 
-  // 1. Icon by type per Section 7.2
-  const TypeIcon = (() => {
+  const isStartNode =
+    nodeId?.toLowerCase().includes("start") ||
+    title?.toLowerCase().includes("start");
+
+  // 1. Icon & accent color by type (n8n style)
+  const { TypeIcon, iconColor } = (() => {
+    if (isStartNode) return { TypeIcon: Play, iconColor: "text-[#E8602E]" };
     switch (type) {
       case "DETERMINISTIC_MATH":
-        return Calculator;
+        return { TypeIcon: Calculator, iconColor: "text-emerald-400" };
       case "GROUNDING_VERIFIER":
-        return ShieldCheck;
+        return { TypeIcon: ShieldCheck, iconColor: "text-emerald-400" };
       case "TOOL_CALL":
-        return Zap;
+        return { TypeIcon: Zap, iconColor: "text-[#E8602E]" };
       case "APPROVAL":
-        return UserCheck;
+        return { TypeIcon: UserCheck, iconColor: "text-amber-400" };
       case "POLICY_GATE":
-        return Scale;
-      case "INGEST_DATA":
-        return Database;
+        return { TypeIcon: Scale, iconColor: "text-amber-400" };
       default:
-        return GitBranch;
+        return { TypeIcon: GitBranch, iconColor: "text-[#A1A1AA]" };
     }
   })();
 
-  // 2. Status icon per Section 7.2
-  const StatusIcon = (() => {
+  // 2. Bottom-right status badge
+  const StatusBadge = (() => {
     switch (status) {
       case "succeeded":
-        return <CheckCircle2 className="h-3.5 w-3.5 text-green-11 shrink-0" />;
+        return <CheckCircle2 className="h-4 w-4 text-emerald-400 fill-[#141417]" />;
       case "running":
-        return <Loader2 className="h-3.5 w-3.5 text-blue-11 animate-spin shrink-0" />;
+        return <Loader2 className="h-4 w-4 text-[#E8602E] animate-spin" />;
       case "waiting":
-        return <PauseCircle className="h-3.5 w-3.5 text-amber-11 shrink-0" />;
+        return <PauseCircle className="h-4 w-4 text-amber-400 fill-[#141417]" />;
       case "failed":
-        return <XCircle className="h-3.5 w-3.5 text-red-11 shrink-0" />;
+        return <XCircle className="h-4 w-4 text-red-400 fill-[#141417]" />;
       default:
-        return <CircleDashed className="h-3.5 w-3.5 text-slate-9 shrink-0" />;
+        return <CircleDashed className="h-3.5 w-3.5 text-[#52525B]" />;
     }
   })();
 
   return (
-    <div
-      className={cn(
-        "w-[208px] h-[56px] rounded-btn bg-slate-2 px-3 py-2 flex items-center justify-between transition-colors select-none",
-        "border border-slate-5",
-        status === "pending" && "border-dashed border-slate-6 text-slate-10",
-        status === "running" && "border-blue-9",
-        status === "waiting" && "border-amber-9",
-        status === "failed" && "border-red-9",
-        status === "succeeded" && "border-slate-5",
-        selected && "ring-2 ring-blue-9 ring-offset-1 ring-offset-app"
-      )}
-    >
-      <Handle type="target" position={Position.Left} className="!bg-slate-7 !w-2 !h-2 !border-none" />
+    <div className="flex flex-col items-center w-[140px] select-none group">
+      {/* n8n Square / Trigger-Pill Node Tile */}
+      <div
+        className={cn(
+          "relative w-[86px] h-[86px] bg-[#1C1C20] border-[1.5px] flex items-center justify-center transition-all shadow-[0_8px_24px_rgba(0,0,0,0.45)]",
+          isStartNode ? "rounded-l-[38px] rounded-r-2xl" : "rounded-2xl",
+          status === "pending" && "border-dashed border-[#3F3F46]",
+          status === "succeeded" && "border-emerald-500/70",
+          status === "running" && "border-[#E8602E] shadow-[0_0_22px_rgba(232,96,46,0.28)]",
+          status === "waiting" && "border-amber-500/80 shadow-[0_0_22px_rgba(245,158,11,0.22)]",
+          status === "failed" && "border-red-500/80 shadow-[0_0_22px_rgba(239,68,68,0.25)]",
+          selected && "ring-4 ring-white/15 border-white/60"
+        )}
+      >
+        {!isStartNode && (
+          <Handle
+            type="target"
+            position={Position.Left}
+            className="!w-2.5 !h-2.5 !bg-[#71717A] !border-2 !border-[#1C1C20] !-left-[6px]"
+          />
+        )}
 
-      {/* Left: 16px lucide icon by type */}
-      <div className="w-5 h-5 rounded flex items-center justify-center shrink-0 mr-2.5 text-slate-11">
-        <TypeIcon className="h-4 w-4" />
+        <TypeIcon className={cn("h-8 w-8 stroke-[1.75]", iconColor)} />
+
+        {/* Status badge in bottom-right corner of tile */}
+        <div className="absolute bottom-1.5 right-1.5 rounded-full bg-[#141417]">
+          {StatusBadge}
+        </div>
+
+        <Handle
+          type="source"
+          position={Position.Right}
+          className="!w-2.5 !h-2.5 !bg-[#71717A] !border-2 !border-[#1C1C20] !-right-[6px]"
+        />
       </div>
 
-      {/* Middle: title 13px/500, subtitle 11px mono node type */}
-      <div className="flex-1 min-w-0 pr-1">
-        <div className="text-ui font-medium text-slate-12 truncate leading-tight">
+      {/* Node Title & Subtitle below tile (exact n8n style) */}
+      <div className="mt-2.5 text-center w-full px-1">
+        <div className="text-[12.5px] font-medium text-[#F4F4F5] leading-tight line-clamp-2">
           {title}
         </div>
-        <div className="font-mono text-ui-xs text-slate-10 truncate leading-tight mt-0.5">
+        <div className="mt-0.5 text-[10.5px] font-mono text-[#71717A] truncate">
           {type ? type.toLowerCase() : "node"}
         </div>
       </div>
-
-      {/* Right: 14px status icon */}
-      <div className="shrink-0 flex items-center justify-center">
-        {StatusIcon}
-      </div>
-
-      <Handle type="source" position={Position.Right} className="!bg-slate-7 !w-2 !h-2 !border-none" />
     </div>
   );
 }
