@@ -513,50 +513,78 @@ export default function LandingPage() {
       {/* Exact Sheryians Bento Showcase Card + Infinite Tech Marquee */}
       <RevealOnScroll className="relative z-10">
         <section className="px-4 sm:px-6 pb-12">
-          <div className="w-full lg:w-[80%] max-w-[1135px] mx-auto border border-[#302C2A] rounded-2xl p-6 flex lg:flex-row flex-col gap-5">
+          <div
+            className="w-full lg:w-[80%] max-w-[1135px] mx-auto border border-[#302C2A] rounded-2xl p-5 md:p-7 flex lg:flex-row flex-col gap-6 items-stretch backdrop-blur-[20px]"
+            style={{
+              boxShadow:
+                "0px 4px 7px 0px rgba(0, 0, 0, 0.05), 0px 4px 4px 0px rgba(0, 0, 0, 0.1), 0px 4px 4px 0px rgba(0, 0, 0, 0.05), inset 0px 1px 68.7px 0px rgb(48, 44, 42)",
+            }}
+          >
             {/* Left Grid: 2 Top Stat Cards + 1 Bottom Statement Card */}
-            <div className="w-full lg:w-1/2 grid grid-cols-1 md:grid-cols-2 md:grid-rows-2 gap-5">
+            <div className="w-full lg:w-1/2 grid grid-cols-1 md:grid-cols-2 md:grid-rows-[246px_246px] gap-5">
               {/* Stat Card 1 */}
-              <div className="rounded-2xl border border-[#302C2A] p-4 flex flex-col justify-between min-h-[245px]">
+              <div className="rounded-2xl bg-transparent border border-[#302C2A] p-5 flex flex-col justify-between min-h-[220px] md:min-h-0">
                 <div>
-                  <div className="font-sans text-[39.17px] font-normal leading-none tracking-[-0.05em] text-white tabular-nums">
+                  <div
+                    className="font-sans text-[40px] lg:text-[42px] font-normal leading-none tracking-[-0.05em] tabular-nums inline-block"
+                    style={{
+                      background:
+                        "linear-gradient(rgb(255, 112, 60) 28.05%, rgb(153, 67, 36) 100%) text",
+                      WebkitTextFillColor: "transparent",
+                    }}
+                  >
                     $42.8M+
                   </div>
-                  <p className="font-sans text-[16.32px] font-extralight leading-[1.4] text-white mt-1.5">
+                  <p className="font-sans text-[16px] font-extralight leading-[1.4] text-white mt-2">
                     Disbursed Safely
                   </p>
                 </div>
-                <p className="font-sans text-[16.32px] font-normal leading-[1.375] text-white mt-auto pt-6">
+                <p className="font-sans text-[16px] font-normal leading-[1.375] text-white mt-auto pt-6">
                   Deterministic execution across every verified PayPal payout.
                 </p>
               </div>
 
               {/* Stat Card 2 */}
-              <div className="rounded-2xl border border-[#302C2A] p-4 flex flex-col justify-between min-h-[245px]">
+              <div className="rounded-2xl bg-transparent border border-[#302C2A] p-5 flex flex-col justify-between min-h-[220px] md:min-h-0">
                 <div>
-                  <div className="font-sans text-[39.17px] font-normal leading-none tracking-[-0.05em] text-white tabular-nums">
+                  <div
+                    className="font-sans text-[40px] lg:text-[42px] font-normal leading-none tracking-[-0.05em] tabular-nums inline-block"
+                    style={{
+                      background:
+                        "linear-gradient(rgb(255, 112, 60) 28.05%, rgb(153, 67, 36) 100%) text",
+                      WebkitTextFillColor: "transparent",
+                    }}
+                  >
                     0.00%
                   </div>
-                  <p className="font-sans text-[16.32px] font-extralight leading-[1.4] text-white mt-1.5">
+                  <p className="font-sans text-[16px] font-extralight leading-[1.4] text-white mt-2">
                     Math Variance
                   </p>
                 </div>
-                <p className="font-sans text-[16.32px] font-normal leading-[1.375] text-white mt-auto pt-6">
+                <p className="font-sans text-[16px] font-normal leading-[1.375] text-white mt-auto pt-6">
                   Exact Python AST Decimal verification on every workflow run.
                 </p>
               </div>
 
               {/* Bottom Statement Card */}
-              <div className="rounded-2xl md:col-span-2 border border-[#302C2A] p-5 flex flex-wrap items-center gap-x-4 gap-y-2 font-sans font-light text-3xl sm:text-4xl lg:text-[48.96px] leading-none text-white">
-                <span>DEPLOY YOUR</span>
-                <Link
-                  href="/studio/new"
-                  className="group inline-flex items-center justify-center px-6 py-1.5 rounded-full border border-[#E8602E]/70 bg-[#E8602E]/10 hover:bg-[#E8602E] text-white transition-all duration-300"
-                  aria-label="Enter Studio"
-                >
-                  <ArrowRight className="h-5 w-5 group-hover:translate-x-1 transition-transform" />
-                </Link>
-                <span>ZERO-RISK PAYMENT AGENTS WITH US!</span>
+              <div className="rounded-2xl bg-transparent md:col-span-2 border border-[#302C2A] p-5 flex flex-col justify-between min-h-[220px] md:min-h-0">
+                <div className="flex flex-col items-start gap-2">
+                  <span className="font-sans font-light text-[34px] sm:text-[42px] leading-none text-white">
+                    DEPLOY YOUR
+                  </span>
+                  <Link
+                    href="/studio/new"
+                    className="group inline-flex items-center pl-[68px] pr-2.5 h-9 rounded-full border border-[#E8602E] bg-transparent hover:bg-[#E8602E]/15 text-white transition-all duration-300"
+                    aria-label="Enter Studio"
+                  >
+                    <span className="font-sans text-[38px] font-light leading-none -mt-1.5 group-hover:translate-x-1 transition-transform">
+                      →
+                    </span>
+                  </Link>
+                </div>
+                <div className="font-sans font-light text-[32px] sm:text-[42px] leading-[1.08] text-white">
+                  ZERO-RISK PAYMENT AGENTS WITH US!
+                </div>
               </div>
             </div>
 
