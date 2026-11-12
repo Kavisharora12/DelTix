@@ -229,12 +229,12 @@ export default function AuditPage() {
   return (
     <div className="flex-1 flex flex-col min-h-0 h-full bg-app select-none">
       {/* Top Header */}
-      <div className="border-b border-slate-5 bg-panel p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+      <div className="border-b border-slate-5 bg-panel px-6 md:px-8 py-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
         <div>
-          <h1 className="text-title-page text-slate-12">
+          <h1 className="font-display text-title-page text-slate-12">
             Financial Audit Ledger &amp; Compliance Trail
           </h1>
-          <p className="text-ui text-slate-10 mt-0.5">
+          <p className="text-ui font-light text-slate-10 mt-1">
             Run lifecycle events, spend-gate decisions, and execution records derived from backend runs.
           </p>
         </div>
@@ -358,7 +358,6 @@ export default function AuditPage() {
                 <th className="py-2.5 px-3 w-36">Action</th>
                 <th className="py-2.5 px-3 text-right w-28">Amount</th>
                 <th className="py-2.5 px-3 w-36">Operator</th>
-                <th className="py-2.5 px-3 w-28 text-center">Status</th>
                 <th className="py-2.5 px-3">Run / Reference ID</th>
               </tr>
             </thead>
@@ -392,19 +391,6 @@ export default function AuditPage() {
                     </td>
                     <td className="py-2 px-3 text-slate-10 truncate max-w-[140px]">
                       {log.operator}
-                    </td>
-                    <td className="py-2 px-3 text-center">
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[11px] font-mono border ${
-                          log.statusCode === 200
-                            ? "bg-green-3 border-green-6 text-green-11"
-                            : log.statusCode === 403
-                            ? "bg-red-3 border-red-6 text-red-11"
-                            : "bg-amber-3 border-amber-6 text-amber-11"
-                        }`}
-                      >
-                        ✓ {log.statusCode}
-                      </span>
                     </td>
                     <td className="py-2 px-3 font-mono text-slate-10">
                       <div className="flex items-center gap-1.5">

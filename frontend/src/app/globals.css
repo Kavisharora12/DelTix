@@ -28,19 +28,19 @@
 
 @layer base {
   :root {
-    /* Dark Theme is default */
-    --slate1: #111113;
-    --slate2: #18191b;
-    --slate3: #212225;
-    --slate4: #272a2d;
-    --slate5: #2e3135;
-    --slate6: #363a3f;
-    --slate7: #43484e;
-    --slate8: #5a6169;
-    --slate9: #696e77;
-    --slate10: #777b84;
-    --slate11: #b0b4ba;
-    --slate12: #edeef0;
+    /* Dark Theme is default - DelTix Pure Black + Terracotta Orange */
+    --slate1: #000000;
+    --slate2: #080808;
+    --slate3: #0c0c0c;
+    --slate4: #141414;
+    --slate5: #232323;
+    --slate6: #2e2e2e;
+    --slate7: #4e4a48;
+    --slate8: #6b6b6b;
+    --slate9: #898989;
+    --slate10: #979797;
+    --slate11: #d4d4d4;
+    --slate12: #ffffff;
 
     --green1: #0e1512;
     --green2: #121b17;
@@ -81,22 +81,22 @@
     --red11: #ff9592;
     --red12: #ffd1d9;
 
-    --blue1: #0d1520;
-    --blue2: #111927;
-    --blue3: #0d2847;
-    --blue4: #003362;
-    --blue5: #004074;
-    --blue6: #104d87;
-    --blue7: #205d9e;
-    --blue8: #2870bd;
-    --blue9: #0090ff;
-    --blue10: #3b9eff;
-    --blue11: #70b8ff;
-    --blue12: #c2e6ff;
+    --blue1: #140804;
+    --blue2: #1e0c06;
+    --blue3: #2e1309;
+    --blue4: #3d190c;
+    --blue5: #4b1e0e;
+    --blue6: #6e2c14;
+    --blue7: #963c1c;
+    --blue8: #c24e24;
+    --blue9: #e8602e;
+    --blue10: #f07142;
+    --blue11: #ff8c61;
+    --blue12: #ffd7c7;
 
     /* Semantic Mappings */
-    --app-bg: var(--slate1);
-    --panel-bg: var(--slate2);
+    --app-bg: #000000;
+    --panel-bg: #050505;
     --raised-bg: var(--slate3);
     --hover-bg: var(--slate4);
     --border-subtle: var(--slate5);

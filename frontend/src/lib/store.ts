@@ -49,6 +49,8 @@ interface DelTixStore {
   startRunSimulation: (runId: string) => void;
 }
 
+let inFlightInit: Promise<void> | null = null;
+
 export const useDelTixStore = create<DelTixStore>((set, get) => ({
   environment: "sandbox",
   setEnvironment: (env) => set({ environment: env }),
@@ -91,19 +93,30 @@ export const useDelTixStore = create<DelTixStore>((set, get) => ({
   isStreaming: false,
 
   init: async () => {
-    set({ isLoading: true, error: null });
-    try {
-      const session = await get().refreshSession();
-      if (!session) {
-        set({ runs: [], agents: [], isLoading: false });
-        return;
-      }
-      await Promise.allSettled([get().fetchAgents(), get().fetchRuns()]);
-    } catch (err: any) {
-      set({ error: err.message || "Failed to initialize DelTix store." });
-    } finally {
-      set({ isLoading: false });
+    if (inFlightInit) return inFlightInit;
+    // Skip redundant full re-fetches if already initialized for an active session
+    if (get().authChecked && get().session && (get().runs.length > 0 || get().agents.length > 0)) {
+      return;
     }
+
+    inFlightInit = (async () => {
+      set({ isLoading: true, error: null });
+      try {
+        const session = await get().refreshSession();
+        if (!session) {
+          set({ runs: [], agents: [], isLoading: false });
+          return;
+        }
+        await Promise.allSettled([get().fetchAgents(), get().fetchRuns()]);
+      } catch (err: any) {
+        set({ error: err.message || "Failed to initialize DelTix store." });
+      } finally {
+        set({ isLoading: false });
+        inFlightInit = null;
+      }
+    })();
+
+    return inFlightInit;
   },
 
   fetchAgents: async () => {
@@ -122,24 +135,39 @@ export const useDelTixStore = create<DelTixStore>((set, get) => ({
   fetchRuns: async () => {
     try {
       const rawRuns = await api.listRuns();
-      const mappedRuns: RunItem[] = [];
+      const specs = get().agents;
 
-      for (const r of rawRuns) {
-        try {
-          const detail = await api.getRun(r.run_id);
-          const spec = get().agents.find((a) => a.id === r.spec_id);
-          mappedRuns.push(
-            mapBackendRunToRunItem(
+      // Only hydrate detailed checkpoints/approval for pending approvals or the 8 most recent runs in parallel
+      const detailTargets = new Set(
+        rawRuns
+          .filter((r, idx) => idx < 8 || r.status === "PAUSED_FOR_APPROVAL")
+          .map((r) => r.run_id)
+      );
+
+      const mappedRuns = await Promise.all(
+        rawRuns.map(async (r) => {
+          const spec = specs.find((a) => a.id === r.spec_id);
+          if (!detailTargets.has(r.run_id)) {
+            return mapBackendRunToRunItem(
+              r,
+              [],
+              undefined,
+              spec ? ({ spec_id: spec.id, name: spec.name } as any) : undefined
+            );
+          }
+          try {
+            const detail = await api.getRun(r.run_id);
+            return mapBackendRunToRunItem(
               detail.run,
               detail.checkpoints || [],
               detail.pending_approval,
-              spec ? { spec_id: spec.id, name: spec.name } as any : undefined
-            )
-          );
-        } catch {
-          mappedRuns.push(mapBackendRunToRunItem(r, []));
-        }
-      }
+              spec ? ({ spec_id: spec.id, name: spec.name } as any) : undefined
+            );
+          } catch {
+            return mapBackendRunToRunItem(r, []);
+          }
+        })
+      );
 
       set((state) => ({
         runs: mappedRuns,

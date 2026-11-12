@@ -136,11 +136,11 @@ const config: Config = {
         cream: "#FFF3EF",
       },
       fontSize: {
-        ui: ["13px", { lineHeight: "1.45" }],
-        "ui-sm": ["12px", { lineHeight: "1.45" }],
-        "ui-xs": ["11px", { lineHeight: "1.4" }],
-        "title-page": ["20px", { lineHeight: "1.25", letterSpacing: "-0.01em", fontWeight: "600" }],
-        "title-section": ["14px", { lineHeight: "1.3", letterSpacing: "-0.01em", fontWeight: "600" }],
+        ui: ["13.5px", { lineHeight: "1.5" }],
+        "ui-sm": ["12.5px", { lineHeight: "1.45" }],
+        "ui-xs": ["11.5px", { lineHeight: "1.4" }],
+        "title-page": ["26px", { lineHeight: "1.2", letterSpacing: "-0.02em", fontWeight: "400" }],
+        "title-section": ["15px", { lineHeight: "1.35", letterSpacing: "-0.01em", fontWeight: "500" }],
       },
       fontFamily: {
         sans: ["var(--font-manrope)", "Inter", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
@@ -148,9 +148,9 @@ const config: Config = {
         mono: ["var(--font-mono)", "'JetBrains Mono'", "'SF Mono'", "Consolas", "monospace"],
       },
       borderRadius: {
-        badge: "4px",
-        btn: "6px",
-        panel: "8px",
+        badge: "6px",
+        btn: "8px",
+        panel: "12px",
       },
       boxShadow: {
         floating: "0 8px 24px rgba(0,0,0,0.35)",

@@ -195,23 +195,23 @@ export default function StudioNewPage() {
   const nodes = compileResult?.agent_ir?.nodes || [];
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-1 overflow-hidden relative">
+    <div className="flex-1 flex flex-col h-full bg-[#000000] overflow-hidden relative font-sans">
         {/* Top Header */}
-        <div className="h-12 border-b border-slate-5 bg-panel px-6 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-slate-12">Compiler Studio</span>
-            <span className="text-slate-7">/</span>
-            <span className="text-xs text-slate-10 font-mono">natural_language_prompt &rarr; agent_ir</span>
+        <div className="h-14 border-b border-[#232323] bg-[#050505] px-6 md:px-8 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2.5">
+            <span className="font-display text-lg text-white">Compiler Studio</span>
+            <span className="text-[#4E4A48]">/</span>
+            <span className="text-xs text-[#898989] font-mono hidden sm:inline">natural_language_prompt &rarr; agent_ir</span>
           </div>
 
           <div className="flex items-center gap-3">
-            <label className="text-xs text-slate-10 font-medium hidden sm:inline">
-              Load Example Template:
+            <label className="text-xs text-[#898989] font-medium hidden sm:inline">
+              Template:
             </label>
             <select
               value={selectedTemplateKey}
               onChange={(e) => handleSelectTemplate(e.target.value)}
-              className="bg-slate-3 border border-slate-5 rounded-btn px-2.5 py-1 text-xs text-slate-12 focus:outline-none focus:border-slate-8"
+              className="bg-[#0C0C0C] border border-[#232323] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#E8602E]"
             >
               <option value="blank">Write Your Own (Blank)</option>
               <option value="refund_agent">Customer Refund Specialist</option>
@@ -225,9 +225,9 @@ export default function StudioNewPage() {
         {/* Studio Main Workspace (2-Column Split: 52% Composer, 48% Diagnostics & Graph) */}
         <div className="flex-1 flex flex-col lg:flex-row min-h-0 overflow-hidden">
           {/* Left Column: Natural Language Financial Prompt Composer */}
-          <div className="flex-1 lg:w-[52%] border-r border-slate-5 flex flex-col bg-panel overflow-y-auto p-6 space-y-5">
+          <div className="flex-1 lg:w-[52%] border-r border-[#232323] flex flex-col bg-[#050505] overflow-y-auto p-6 space-y-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-11 uppercase tracking-wider mb-1.5">
+              <label className="block text-[11px] font-mono text-[#898989] uppercase tracking-wider mb-1.5">
                 Agent Specification Name
               </label>
               <input
@@ -235,16 +235,16 @@ export default function StudioNewPage() {
                 value={agentName}
                 onChange={(e) => setAgentName(e.target.value)}
                 placeholder="e.g. E-Commerce Automated Refund Agent"
-                className="w-full bg-slate-2 border border-slate-5 rounded-btn px-3 py-2 text-sm text-slate-12 focus:outline-none focus:border-slate-8 font-medium"
+                className="w-full bg-[#080808] border border-[#232323] rounded-lg px-3.5 py-2.5 text-sm text-white placeholder-[#6B6B6B] focus:outline-none focus:border-[#E8602E] font-medium transition-colors"
               />
             </div>
 
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-h-[180px]">
               <div className="flex items-center justify-between mb-1.5">
-                <label className="text-xs font-semibold text-slate-11 uppercase tracking-wider">
-                  Describe Agent Financial Workflow (Plain English)
+                <label className="text-[11px] font-mono text-[#898989] uppercase tracking-wider">
+                  Workflow Rules (Plain English)
                 </label>
-                <span className="text-[11px] text-slate-9 font-mono">
+                <span className="text-[11px] text-[#6B6B6B] font-mono">
                   AST Python Math &bull; Fail-Closed
                 </span>
               </div>
@@ -252,84 +252,88 @@ export default function StudioNewPage() {
                 value={promptText}
                 onChange={(e) => setPromptText(e.target.value)}
                 placeholder="Describe trigger condition, verification checks, exact math calculations, spend limits, and human approval threshold..."
-                rows={9}
-                className="w-full flex-1 p-3 bg-slate-2 border border-slate-5 rounded-card text-xs text-slate-12 font-mono leading-relaxed focus:outline-none focus:border-slate-8 resize-none selection:bg-blue-3 selection:text-blue-11"
+                rows={7}
+                className="w-full flex-1 p-3.5 bg-[#080808] border border-[#232323] rounded-xl text-[13px] text-white placeholder-[#6B6B6B] font-mono leading-relaxed focus:outline-none focus:border-[#E8602E] resize-none transition-colors"
               />
             </div>
 
-            {/* Quick Settings (Optionally Sent as Explicit Compiler Constraints) */}
-            <div className="p-4 bg-slate-2/60 border border-slate-5 rounded-card space-y-4">
-              <div className="text-xs font-semibold text-slate-11 uppercase tracking-wider flex items-center justify-between gap-2">
-                <span>Quick Financial Settings</span>
-                <label className="flex items-center gap-1.5 text-[11px] font-normal text-slate-10 cursor-pointer lowercase">
+            {/* Quick Settings (Collapsible to keep workspace clean) */}
+            <div className="px-4 py-3 bg-[#080808] border border-[#232323] rounded-xl space-y-3">
+              <div className="text-[11px] font-mono text-[#979797] uppercase tracking-wider flex items-center justify-between gap-2">
+                <span>Spend Limits &amp; Capabilities (Optional)</span>
+                <label className="flex items-center gap-2 text-[11px] font-sans font-normal text-[#898989] hover:text-white cursor-pointer normal-case">
                   <input
                     type="checkbox"
                     checked={applyQuickSettings}
                     onChange={(e) => setApplyQuickSettings(e.target.checked)}
-                    className="rounded border-slate-6"
+                    className="rounded border-[#4E4A48] accent-[#E8602E]"
                   />
-                  <span>send limits to compiler</span>
+                  <span>Customize limits</span>
                 </label>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs text-slate-10 mb-1">
-                    Max Spend Limit / Run (USD)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1.5 text-xs text-slate-9 font-mono">$</span>
-                    <input
-                      type="number"
-                      value={spendCap}
-                      onChange={(e) => setSpendCap(Number(e.target.value))}
-                      className="w-full pl-6 pr-3 py-1.5 bg-slate-3 border border-slate-5 rounded text-xs text-slate-12 font-mono focus:outline-none focus:border-slate-8"
-                    />
+              {applyQuickSettings && (
+                <div className="space-y-3 pt-1 border-t border-[#1A1A1A]">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="block text-xs text-[#898989] mb-1">
+                        Max Spend Limit / Run (USD)
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2 text-xs text-[#6B6B6B] font-mono">$</span>
+                        <input
+                          type="number"
+                          value={spendCap}
+                          onChange={(e) => setSpendCap(Number(e.target.value))}
+                          className="w-full pl-7 pr-3 py-1.5 bg-[#0C0C0C] border border-[#232323] rounded-lg text-xs text-white font-mono focus:outline-none focus:border-[#E8602E]"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs text-[#898989] mb-1">
+                        Human Approval Threshold (USD)
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-2 text-xs text-[#6B6B6B] font-mono">$</span>
+                        <input
+                          type="number"
+                          value={approvalThreshold}
+                          onChange={(e) => setApprovalThreshold(Number(e.target.value))}
+                          className="w-full pl-7 pr-3 py-1.5 bg-[#0C0C0C] border border-[#232323] rounded-lg text-xs text-white font-mono focus:outline-none focus:border-[#E8602E]"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-[#898989] mb-1.5">
+                      Permitted External Capabilities
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: "paypal.transaction.search", label: "paypal.transaction.search" },
+                        { id: "paypal.payment.refund", label: "paypal.payment.refund" },
+                        { id: "paypal.invoice.create", label: "paypal.invoice.create" },
+                      ].map((tool) => (
+                        <button
+                          key={tool.id}
+                          type="button"
+                          onClick={() => toggleTool(tool.id)}
+                          className={`px-2.5 py-1 rounded-md text-xs border font-mono transition-colors ${
+                            selectedTools.includes(tool.id)
+                              ? "bg-[#E8602E]/15 border-[#E8602E]/40 text-[#E8602E] font-medium"
+                              : "bg-[#0C0C0C] border-[#232323] text-[#898989] hover:text-white"
+                          }`}
+                        >
+                          {selectedTools.includes(tool.id) ? "✓ " : "+ "}
+                          {tool.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-
-                <div>
-                  <label className="block text-xs text-slate-10 mb-1">
-                    Human Approval Threshold (USD)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-1.5 text-xs text-slate-9 font-mono">$</span>
-                    <input
-                      type="number"
-                      value={approvalThreshold}
-                      onChange={(e) => setApprovalThreshold(Number(e.target.value))}
-                      className="w-full pl-6 pr-3 py-1.5 bg-slate-3 border border-slate-5 rounded text-xs text-slate-12 font-mono focus:outline-none focus:border-slate-8"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs text-slate-10 mb-2">
-                  Permitted External Capabilities
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { id: "paypal.transaction.search", label: "paypal.transaction.search" },
-                    { id: "paypal.payment.refund", label: "paypal.payment.refund" },
-                    { id: "paypal.invoice.create", label: "paypal.invoice.create" },
-                  ].map((tool) => (
-                    <button
-                      key={tool.id}
-                      type="button"
-                      onClick={() => toggleTool(tool.id)}
-                      className={`px-2.5 py-1 rounded text-xs border font-mono transition-colors ${
-                        selectedTools.includes(tool.id)
-                          ? "bg-blue-3 border-blue-6 text-blue-11 font-medium"
-                          : "bg-slate-3 border-slate-5 text-slate-10 hover:text-slate-12"
-                      }`}
-                    >
-                      {selectedTools.includes(tool.id) ? "✓ " : "+ "}
-                      {tool.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              )}
             </div>
 
             {/* Error Message */}

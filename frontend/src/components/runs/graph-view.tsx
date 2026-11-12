@@ -4,6 +4,8 @@ import React, { useState, useMemo, useEffect } from "react";
 import {
   ReactFlow,
   Controls,
+  Background,
+  BackgroundVariant,
   useNodesState,
   useEdgesState,
   MarkerType,
@@ -33,14 +35,14 @@ interface GraphViewProps {
   run: RunItem;
 }
 
-// Layout helper with dagre
+// Layout helper with dagre (n8n horizontal spacing)
 function getLayoutedElements(nodes: any[], edges: any[]) {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
-  dagreGraph.setGraph({ rankdir: "LR", ranksep: 60, nodesep: 30 });
+  dagreGraph.setGraph({ rankdir: "LR", ranksep: 85, nodesep: 45 });
 
   nodes.forEach((node) => {
-    dagreGraph.setNode(node.id, { width: 208, height: 56 });
+    dagreGraph.setNode(node.id, { width: 140, height: 135 });
   });
 
   edges.forEach((edge) => {
@@ -54,8 +56,8 @@ function getLayoutedElements(nodes: any[], edges: any[]) {
     return {
       ...node,
       position: {
-        x: nodeWithPosition.x - 104,
-        y: nodeWithPosition.y - 28,
+        x: nodeWithPosition.x - 70,
+        y: nodeWithPosition.y - 67,
       },
     };
   });
@@ -97,7 +99,7 @@ export function GraphView({ run }: GraphViewProps) {
     }));
   }, [run.nodes, selectedNodeId]);
 
-  // Edges per Section 7.2: 1px slate7. Only currently executing edge is blue.
+  // n8n smooth bezier edges
   const initialEdges = useMemo(() => {
     return run.edges.map((edge) => {
       const isExecuting = edge.isExecuting;
@@ -105,15 +107,16 @@ export function GraphView({ run }: GraphViewProps) {
         id: edge.id,
         source: edge.source,
         target: edge.target,
+        type: "default",
         style: {
-          stroke: isExecuting ? "var(--blue9)" : "var(--slate7)",
-          strokeWidth: 1.5,
-          strokeDasharray: isExecuting ? "4 4" : undefined,
+          stroke: isExecuting ? "#E8602E" : "#52525B",
+          strokeWidth: 2,
+          strokeDasharray: isExecuting ? "5 5" : undefined,
         },
         animated: isExecuting,
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          color: isExecuting ? "var(--blue9)" : "var(--slate7)",
+          color: isExecuting ? "#E8602E" : "#52525B",
           width: 14,
           height: 14,
         },
@@ -143,8 +146,8 @@ export function GraphView({ run }: GraphViewProps) {
 
   return (
     <div className="flex-1 flex min-h-0 h-full overflow-hidden select-none bg-app">
-      {/* Left Canvas (65%): React Flow */}
-      <div className="flex-[65] h-full relative border-r border-slate-5 bg-app">
+      {/* Left Canvas (65%): n8n-style Dotted Workflow Canvas */}
+      <div className="flex-[65] h-full relative border-r border-slate-5 bg-[#0F0F12]">
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -153,15 +156,16 @@ export function GraphView({ run }: GraphViewProps) {
           onEdgesChange={onEdgesChange}
           onNodeClick={onNodeClick}
           fitView
-          fitViewOptions={{ padding: 0.2 }}
+          fitViewOptions={{ padding: 0.25 }}
           minZoom={0.3}
           maxZoom={1.5}
           proOptions={{ hideAttribution: true }}
-          className="bg-app"
+          className="bg-[#0F0F12]"
         >
+          <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="#27272A" />
           <Controls
             showInteractive={false}
-            className="!bg-panel !border-slate-5 !rounded-btn !shadow-floating !overflow-hidden"
+            className="!bg-[#18181B] !border !border-[#27272A] !rounded-lg !shadow-xl !overflow-hidden [&>button]:!bg-[#18181B] [&>button]:!border-b-[#27272A] [&>button]:!text-white [&>button]:!fill-white [&>button:hover]:!bg-[#27272A]"
           />
         </ReactFlow>
 

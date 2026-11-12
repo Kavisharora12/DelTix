@@ -10,9 +10,6 @@ import {
   Ban,
   GitBranch,
   ListOrdered,
-  Layers,
-  ShieldCheck,
-  FileCode2,
 } from "lucide-react";
 import { RunItem } from "@/types";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -21,9 +18,6 @@ import { KeyFacts } from "@/components/ui/key-facts";
 import { Button } from "@/components/ui/button";
 import { GraphView } from "./graph-view";
 import { TimelineView } from "./timeline-view";
-import { CheckpointsView } from "./checkpoints-view";
-import { PolicyView } from "./policy-view";
-import { RawView } from "./raw-view";
 import { useDelTixStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +26,7 @@ interface RunDetailViewProps {
 }
 
 export function RunDetailView({ run }: RunDetailViewProps) {
-  const [activeTab, setActiveTab] = useState<"graph" | "timeline" | "checkpoints" | "policy" | "raw">("graph");
+  const [activeTab, setActiveTab] = useState<"graph" | "timeline">("graph");
   const [copiedId, setCopiedId] = useState(false);
   const { rejectRun, retryRunFromCheckpoint } = useDelTixStore();
 
@@ -164,7 +158,7 @@ export function RunDetailView({ run }: RunDetailViewProps) {
           className={cn(
             "h-full px-3 flex items-center gap-1.5 text-ui font-medium border-b-2 transition-colors",
             activeTab === "graph"
-              ? "border-blue-9 text-slate-12"
+              ? "border-[#E8602E] text-slate-12"
               : "border-transparent text-slate-10 hover:text-slate-12"
           )}
         >
@@ -178,54 +172,12 @@ export function RunDetailView({ run }: RunDetailViewProps) {
           className={cn(
             "h-full px-3 flex items-center gap-1.5 text-ui font-medium border-b-2 transition-colors",
             activeTab === "timeline"
-              ? "border-blue-9 text-slate-12"
+              ? "border-[#E8602E] text-slate-12"
               : "border-transparent text-slate-10 hover:text-slate-12"
           )}
         >
           <ListOrdered className="h-3.5 w-3.5" />
           <span>Event Timeline</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("checkpoints")}
-          className={cn(
-            "h-full px-3 flex items-center gap-1.5 text-ui font-medium border-b-2 transition-colors",
-            activeTab === "checkpoints"
-              ? "border-blue-9 text-slate-12"
-              : "border-transparent text-slate-10 hover:text-slate-12"
-          )}
-        >
-          <Layers className="h-3.5 w-3.5" />
-          <span>Checkpoints</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("policy")}
-          className={cn(
-            "h-full px-3 flex items-center gap-1.5 text-ui font-medium border-b-2 transition-colors",
-            activeTab === "policy"
-              ? "border-blue-9 text-slate-12"
-              : "border-transparent text-slate-10 hover:text-slate-12"
-          )}
-        >
-          <ShieldCheck className="h-3.5 w-3.5" />
-          <span>Policy Evaluations</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab("raw")}
-          className={cn(
-            "h-full px-3 flex items-center gap-1.5 text-ui font-medium border-b-2 transition-colors",
-            activeTab === "raw"
-              ? "border-blue-9 text-slate-12"
-              : "border-transparent text-slate-10 hover:text-slate-12"
-          )}
-        >
-          <FileCode2 className="h-3.5 w-3.5" />
-          <span>Raw Snapshot</span>
         </button>
       </div>
 
@@ -233,14 +185,6 @@ export function RunDetailView({ run }: RunDetailViewProps) {
       <div className="flex-1 flex min-h-0 overflow-hidden">
         {activeTab === "graph" && <GraphView run={run} />}
         {activeTab === "timeline" && <TimelineView timeline={run.timeline} />}
-        {activeTab === "checkpoints" && (
-          <CheckpointsView
-            checkpoints={run.checkpoints}
-            onRetryFromCheckpoint={() => retryRunFromCheckpoint(run.id)}
-          />
-        )}
-        {activeTab === "policy" && <PolicyView evaluations={run.policyEvaluations} />}
-        {activeTab === "raw" && <RawView run={run} />}
       </div>
     </div>
   );
